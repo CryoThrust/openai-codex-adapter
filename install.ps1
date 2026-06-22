@@ -53,13 +53,13 @@ if (Test-Path "$InstallDir\config.env") {
 
 # ── 预设 Provider ─────────────────────────────────────
 $Providers = [ordered]@{
-    "1" = @{ Name = "DeepSeek";          Url = "https://api.deepseek.com/v1/chat/completions";           Model = "deepseek-chat" }
-    "2" = @{ Name = "讯飞星辰 (Xfyun)";  Url = "https://maas-coding-api.cn-huabei-1.xf-yun.com/v2/chat/completions"; Model = "astron-code-latest" }
-    "3" = @{ Name = "Ollama (本地)";      Url = "http://127.0.0.1:11434/v1/chat/completions";            Model = "qwen2.5-coder:7b" }
-    "4" = @{ Name = "LM Studio (本地)";   Url = "http://127.0.0.1:1234/v1/chat/completions";            Model = "default" }
-    "5" = @{ Name = "SiliconFlow";        Url = "https://api.siliconflow.cn/v1/chat/completions";        Model = "deepseek-ai/DeepSeek-V3" }
-    "6" = @{ Name = "OpenAI (官方)";      Url = "https://api.openai.com/v1/chat/completions";            Model = "gpt-4o" }
-    "7" = @{ Name = "自定义 (Custom)";    Url = "";                                                       Model = "" }
+    "1" = @{ Name = "DeepSeek";          Url = "https://api.deepseek.com/v1/chat/completions";           Model = "deepseek-chat";           ContextWindow = 128000 }
+    "2" = @{ Name = "讯飞星辰 (Xfyun)";  Url = "https://maas-coding-api.cn-huabei-1.xf-yun.com/v2/chat/completions"; Model = "astron-code-latest"; ContextWindow = 200000 }
+    "3" = @{ Name = "Ollama (本地)";      Url = "http://127.0.0.1:11434/v1/chat/completions";            Model = "qwen2.5-coder:7b";       ContextWindow = 128000 }
+    "4" = @{ Name = "LM Studio (本地)";   Url = "http://127.0.0.1:1234/v1/chat/completions";            Model = "default";                 ContextWindow = 128000 }
+    "5" = @{ Name = "SiliconFlow";        Url = "https://api.siliconflow.cn/v1/chat/completions";        Model = "deepseek-ai/DeepSeek-V3"; ContextWindow = 128000 }
+    "6" = @{ Name = "OpenAI (官方)";      Url = "https://api.openai.com/v1/chat/completions";            Model = "gpt-4o";                  ContextWindow = 128000 }
+    "7" = @{ Name = "自定义 (Custom)";    Url = "";                                                       Model = "";                        ContextWindow = 0 }
 }
 
 # ── 检查环境 ──────────────────────────────────────────
@@ -159,6 +159,8 @@ ADAPTER_MODEL=$model
 ADAPTER_API_KEY=$apiKey
 ADAPTER_RETRY_MAX=5
 ADAPTER_RETRY_DELAY=2.0
+ADAPTER_CONTEXT_WINDOW=$contextWindow
+ADAPTER_AUTO_COMPACT_LIMIT=$autoCompactLimit
 "@
 Set-Content -Path "$InstallDir\config.env" -Value $envContent -Encoding UTF8
 
@@ -239,17 +241,21 @@ if ($codex_choice -ne "n" -and $codex_choice -ne "N") {
             Set-Content -Path $configPath -Value $existing -Encoding UTF8
         }
     } else {
+        $ctxLines = ""
+        if ($contextWindow -gt 0) {
+            $ctxLines = "model_context_window = $contextWindow`nmodel_auto_compact_token_limit = $autoCompactLimit`n"
+        }
         $freshConfig = @"
 model_provider = "custom"
 model = "$model"
-
+$ctxLines
 [model_providers]
 [model_providers.custom]
 name = "custom"
 wire_api = "responses"
 requires_openai_auth = true
 base_url = "http://127.0.0.1:$port/v1"
-
+$(if ($contextWindow -gt 0) { "model_context_window = $contextWindow`nmodel_auto_compact_token_limit = $autoCompactLimit" })
 [shell_environment_policy]
 inherit = "core"
 
@@ -283,6 +289,7 @@ Write-Host "  Provider:  $($selected.Name)" -ForegroundColor Cyan
 Write-Host "  上游地址:  $upstream" -ForegroundColor Cyan
 Write-Host "  模型:      $model" -ForegroundColor Cyan
 Write-Host "  适配器:    http://127.0.0.1:$port" -ForegroundColor Cyan
+Write-Host "  上下文:    $contextWindow tokens (压缩阈值: $autoCompactLimit)" -ForegroundColor Cyan
 Write-Host "  健康检查:  curl http://127.0.0.1:$port/health" -ForegroundColor Cyan
 Write-Host ""
 if ($codex_configured) {
@@ -291,6 +298,8 @@ if ($codex_configured) {
     Write-Host "  Codex config.toml 未配置，请手动编辑 $CodexDir\config.toml" -ForegroundColor Yellow
     Write-Host "    model_provider = `"custom`"" -ForegroundColor Green
     Write-Host "    model = `"$model`"" -ForegroundColor Green
+    Write-Host "    model_context_window = $contextWindow" -ForegroundColor Green
+    Write-Host "    model_auto_compact_token_limit = $autoCompactLimit" -ForegroundColor Green
     Write-Host "    [model_providers.custom]" -ForegroundColor Green
     Write-Host "    wire_api = `"responses`"" -ForegroundColor Green
     Write-Host "    requires_openai_auth = true" -ForegroundColor Green

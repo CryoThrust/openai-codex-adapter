@@ -18,6 +18,7 @@ echo -e "${BOLD}${CYAN}═══ 当前配置 ═══${NC}"
 echo -e "  上游: ${GREEN}$ADAPTER_UPSTREAM${NC}"
 echo -e "  模型: ${GREEN}$ADAPTER_MODEL${NC}"
 echo -e "  端口: ${GREEN}$ADAPTER_PORT${NC}"
+echo -e "  上下文: ${GREEN}${ADAPTER_CONTEXT_WINDOW:-0} tokens (压缩: ${ADAPTER_AUTO_COMPACT_LIMIT:-0})${NC}"
 echo ""
 
 declare -A P_URLS P_MODELS P_NAMES
@@ -72,6 +73,50 @@ else
 fi
 echo -ne "端口 [当前: $NEW_PORT, 回车不变]: "; read -r p; [[ -n "$p" ]] && NEW_PORT="$p"
 
+# ── 上下文窗口 ────────────────────────────────────
+CURRENT_CONTEXT="${ADAPTER_CONTEXT_WINDOW:-0}"
+CURRENT_COMPACT="${ADAPTER_AUTO_COMPACT_LIMIT:-0}"
+NEW_CONTEXT="$CURRENT_CONTEXT"
+NEW_COMPACT="$CURRENT_COMPACT"
+
+if [[ "$choice" != "0" ]]; then
+    PRESET_CTX="${P_CONTEXT[$choice]:-0}"
+    if [[ "$PRESET_CTX" -gt 0 ]]; then
+        echo ""
+        echo -e "  ${BOLD}模型上下文窗口:${NC} ${CYAN}${PRESET_CTX} tokens${NC}"
+        echo -ne "  确认或自定义 [回车确认 / 输入数值]: "
+        read -r ctx_input
+        if [[ -n "$ctx_input" ]]; then
+            NEW_CONTEXT="$ctx_input"
+        else
+            NEW_CONTEXT="$PRESET_CTX"
+        fi
+    else
+        echo ""
+        echo -ne "  上下文窗口 (当前: $CURRENT_CONTEXT, 0=不限): "
+        read -r ctx_input
+        [[ -n "$ctx_input" ]] && NEW_CONTEXT="$ctx_input"
+    fi
+else
+    echo ""
+    echo -ne "  上下文窗口 (当前: $CURRENT_CONTEXT, 回车不变): "
+    read -r ctx_input
+    [[ -n "$ctx_input" ]] && NEW_CONTEXT="$ctx_input"
+fi
+
+if [[ "$NEW_CONTEXT" -gt 0 ]]; then
+    DEFAULT_COMPACT=$(( NEW_CONTEXT * 80 / 100 ))
+    echo -ne "  自动压缩阈值 [当前: $CURRENT_COMPACT, 默认80%=$DEFAULT_COMPACT]: "
+    read -r compact_input
+    if [[ -n "$compact_input" ]]; then
+        NEW_COMPACT="$compact_input"
+    elif [[ "$CURRENT_COMPACT" -eq 0 || "$choice" != "0" ]]; then
+        NEW_COMPACT="$DEFAULT_COMPACT"
+    fi
+else
+    NEW_COMPACT=0
+fi
+
 # 写配置
 cat > "$INSTALL_DIR/config.env" << ENV
 ADAPTER_HOST=127.0.0.1
@@ -81,6 +126,8 @@ ADAPTER_MODEL=$NEW_MODEL
 ADAPTER_API_KEY=$NEW_KEY
 ADAPTER_RETRY_MAX=$ADAPTER_RETRY_MAX
 ADAPTER_RETRY_DELAY=$ADAPTER_RETRY_DELAY
+ADAPTER_CONTEXT_WINDOW=$NEW_CONTEXT
+ADAPTER_AUTO_COMPACT_LIMIT=$NEW_COMPACT
 ENV
 
 # 更新 LaunchAgent
@@ -101,6 +148,8 @@ cat > "$PLIST_PATH" << PLIST
         <key>ADAPTER_API_KEY</key><string>${NEW_KEY}</string>
         <key>ADAPTER_RETRY_MAX</key><string>${ADAPTER_RETRY_MAX}</string>
         <key>ADAPTER_RETRY_DELAY</key><string>${ADAPTER_RETRY_DELAY}</string>
+        <key>ADAPTER_CONTEXT_WINDOW</key><string>${NEW_CONTEXT}</string>
+        <key>ADAPTER_AUTO_COMPACT_LIMIT</key><string>${NEW_COMPACT}</string>
     </dict>
     <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
     <key>StandardOutPath</key><string>${INSTALL_DIR}/adapter.log</string>
@@ -129,7 +178,9 @@ wire_api = "responses"
 requires_openai_auth = true
 request_max_retries = 2
 stream_max_retries = 2
-stream_idle_timeout_ms = 300000'''
+stream_idle_timeout_ms = 300000
+model_context_window = "$NEW_CONTEXT"
+model_auto_compact_token_limit = "$NEW_COMPACT"'''
 settings = {"auth": {"OPENAI_API_KEY": "$NEW_KEY"}, "config": config}
 meta = {"provider_url": "$NEW_URL", "provider_model": "$NEW_MODEL", "port": "$NEW_PORT"}
 con.execute("""insert into providers (
@@ -167,5 +218,6 @@ echo -e "${GREEN}✅ 已切换并重启${NC}"
 echo -e "  上游: ${CYAN}$NEW_URL${NC}"
 echo -e "  模型: ${CYAN}$NEW_MODEL${NC}"
 echo -e "  端口: ${CYAN}$NEW_PORT${NC}"
+echo -e "  上下文: ${CYAN}${NEW_CONTEXT} tokens (压缩阈值: ${NEW_COMPACT})${NC}"
 echo ""
 echo -e "${YELLOW}⚠️  请重启 Codex 生效${NC}"

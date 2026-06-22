@@ -48,6 +48,18 @@ P_MODELS=(
   [7]=""
 )
 
+# ── 模型上下文窗口预设 (token 数) ──────────────────
+declare -A P_CONTEXT
+P_CONTEXT=(
+  [1]="128000"
+  [2]="200000"
+  [3]="128000"
+  [4]="128000"
+  [5]="128000"
+  [6]="128000"
+  [7]="0"
+)
+
 # ── 检查环境 ──────────────────────────────────────────
 [[ "$(uname -s)" != "Darwin" ]] && die "macOS only. Windows 请使用 install.ps1"
 PYTHON3="$(command -v python3 || true)"
@@ -151,6 +163,40 @@ echo -ne "端口 [默认: $PORT]: "
 read -r input_port
 [[ -n "$input_port" ]] && PORT="$input_port"
 
+# ── 上下文窗口 ────────────────────────────────────────
+PRESET_CONTEXT="${P_CONTEXT[$SELECTED]:-0}"
+CONTEXT_WINDOW="$PRESET_CONTEXT"
+AUTO_COMPACT_LIMIT="0"
+
+echo ""
+if [[ "$PRESET_CONTEXT" -gt 0 ]]; then
+    echo -e "  ${BOLD}模型上下文窗口:${NC} ${CYAN}${PRESET_CONTEXT} tokens${NC}"
+    echo -ne "  确认或自定义 [回车确认 / 输入数值]: "
+    read -r ctx_input
+    [[ -n "$ctx_input" ]] && CONTEXT_WINDOW="$ctx_input"
+else
+    echo -e "  ${YELLOW}⚠️  未找到模型预设，请手动输入上下文窗口大小${NC}"
+    echo -e "  常见值: DeepSeek=128000, 讯飞GLM=200000, GPT-4o=128000, GPT-4.1=1000000"
+    echo -ne "  上下文窗口 (token 数, 0=不限): "
+    read -r CONTEXT_WINDOW
+    CONTEXT_WINDOW="${CONTEXT_WINDOW:-0}"
+fi
+
+# 自动压缩阈值 (默认 80%)
+if [[ "$CONTEXT_WINDOW" -gt 0 ]]; then
+    AUTO_COMPACT_LIMIT=$(( CONTEXT_WINDOW * 80 / 100 ))
+    echo -ne "  自动压缩阈值 [默认: ${AUTO_COMPACT_LIMIT} (80%)]: "
+    read -r compact_input
+    [[ -n "$compact_input" ]] && AUTO_COMPACT_LIMIT="$compact_input"
+fi
+
+echo ""
+echo -e "  ${YELLOW}⚠️  上下文窗口设置说明:${NC}"
+echo -e "    - 设置过大会导致上下文超限报错 (stream disconnected)"
+echo -e "    - 设置过小会过早压缩丢失对话历史"
+echo -e "    - 适配器会在达到阈值时自动截断旧消息作为安全网"
+echo -e "    - Codex 的 model_auto_compact_token_limit 是主要防线"
+
 # ── 安装文件 ──────────────────────────────────────────
 info "安装到 $INSTALL_DIR ..."
 mkdir -p "$INSTALL_DIR"
@@ -177,6 +223,8 @@ ADAPTER_MODEL=$MODEL
 ADAPTER_API_KEY=$API_KEY
 ADAPTER_RETRY_MAX=5
 ADAPTER_RETRY_DELAY=2.0
+ADAPTER_CONTEXT_WINDOW=$CONTEXT_WINDOW
+ADAPTER_AUTO_COMPACT_LIMIT=$AUTO_COMPACT_LIMIT
 ENV
 ok "配置已写入"
 
@@ -203,6 +251,8 @@ cat > "$PLIST_PATH" << PLIST
         <key>ADAPTER_API_KEY</key><string>${API_KEY}</string>
         <key>ADAPTER_RETRY_MAX</key><string>5</string>
         <key>ADAPTER_RETRY_DELAY</key><string>2.0</string>
+        <key>ADAPTER_CONTEXT_WINDOW</key><string>${CONTEXT_WINDOW}</string>
+        <key>ADAPTER_AUTO_COMPACT_LIMIT</key><string>${AUTO_COMPACT_LIMIT}</string>
     </dict>
     <key>RunAtLoad</key><true/>
     <key>KeepAlive</key><true/>
@@ -286,16 +336,20 @@ if existing:
     config_path.write_text(existing, encoding="utf-8")
 else:
     # Write fresh minimal config
+    context_window = "$CONTEXT_WINDOW"
+    auto_compact = "$AUTO_COMPACT_LIMIT"
+    ctx_line = f"\nmodel_context_window = {context_window}\nmodel_auto_compact_token_limit = {auto_compact}" if int(context_window) > 0 else ""
+
     config = f"""model_provider = "custom"
 model = "{model}"
-
+{ctx_line.lstrip(chr(10)) if ctx_line else ""}
 [model_providers]
 [model_providers.custom]
 name = "custom"
 wire_api = "responses"
 requires_openai_auth = true
 base_url = "{base_url}"
-
+{"model_context_window = " + context_window + chr(10) + "model_auto_compact_token_limit = " + auto_compact if int(context_window) > 0 else ""}
 [shell_environment_policy]
 inherit = "core"
 
@@ -424,6 +478,7 @@ echo -e "  Provider:  ${CYAN}$SELECTED_NAME${NC}"
 echo -e "  上游地址:  ${CYAN}$UPSTREAM${NC}"
 echo -e "  模型:      ${CYAN}$MODEL${NC}"
 echo -e "  适配器:    ${CYAN}http://127.0.0.1:$PORT${NC}"
+echo -e "  上下文:    ${CYAN}${CONTEXT_WINDOW} tokens (压缩阈值: ${AUTO_COMPACT_LIMIT})${NC}"
 echo -e "  健康检查:  ${CYAN}curl http://127.0.0.1:$PORT/health${NC}"
 echo ""
 if $CC_INTEGRATED; then
@@ -434,6 +489,8 @@ echo -e "  ${YELLOW}手动配置 Codex:${NC}"
 echo -e "  在 ${CYAN}~/.codex/config.toml${NC} 中:"
 echo -e "    ${GREEN}model_provider = \"custom\""
 echo -e "    model = \"$MODEL\""
+echo -e "    model_context_window = $CONTEXT_WINDOW"
+echo -e "    model_auto_compact_token_limit = $AUTO_COMPACT_LIMIT"
 echo -e "    [model_providers.custom]"
 echo -e "    wire_api = \"responses\""
 echo -e "    requires_openai_auth = true"

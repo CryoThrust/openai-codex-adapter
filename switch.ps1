@@ -20,17 +20,18 @@ Write-Host "═══ 当前配置 ═══" -ForegroundColor Cyan
 Write-Host "  上游: $($currentConfig['ADAPTER_UPSTREAM'])" -ForegroundColor Green
 Write-Host "  模型: $($currentConfig['ADAPTER_MODEL'])" -ForegroundColor Green
 Write-Host "  端口: $($currentConfig['ADAPTER_PORT'])" -ForegroundColor Green
+Write-Host "  上下文: $($currentConfig['ADAPTER_CONTEXT_WINDOW']) tokens (压缩: $($currentConfig['ADAPTER_AUTO_COMPACT_LIMIT']))" -ForegroundColor Green
 Write-Host ""
 
 $Providers = [ordered]@{
-    "1" = @{ Name = "DeepSeek";          Url = "https://api.deepseek.com/v1/chat/completions";           Model = "deepseek-chat" }
-    "2" = @{ Name = "讯飞星辰";          Url = "https://maas-coding-api.cn-huabei-1.xf-yun.com/v2/chat/completions"; Model = "astron-code-latest" }
-    "3" = @{ Name = "Ollama (本地)";      Url = "http://127.0.0.1:11434/v1/chat/completions";            Model = "qwen2.5-coder:7b" }
-    "4" = @{ Name = "LM Studio (本地)";   Url = "http://127.0.0.1:1234/v1/chat/completions";            Model = "default" }
-    "5" = @{ Name = "SiliconFlow";        Url = "https://api.siliconflow.cn/v1/chat/completions";        Model = "deepseek-ai/DeepSeek-V3" }
-    "6" = @{ Name = "OpenAI (官方)";      Url = "https://api.openai.com/v1/chat/completions";            Model = "gpt-4o" }
-    "7" = @{ Name = "自定义";             Url = "";                                                       Model = "" }
-    "0" = @{ Name = "仅改 Key/模型/端口"; Url = "";                                                       Model = "" }
+    "1" = @{ Name = "DeepSeek";          Url = "https://api.deepseek.com/v1/chat/completions";           Model = "deepseek-chat";           ContextWindow = 128000 }
+    "2" = @{ Name = "讯飞星辰";          Url = "https://maas-coding-api.cn-huabei-1.xf-yun.com/v2/chat/completions"; Model = "astron-code-latest"; ContextWindow = 200000 }
+    "3" = @{ Name = "Ollama (本地)";      Url = "http://127.0.0.1:11434/v1/chat/completions";            Model = "qwen2.5-coder:7b";       ContextWindow = 128000 }
+    "4" = @{ Name = "LM Studio (本地)";   Url = "http://127.0.0.1:1234/v1/chat/completions";            Model = "default";                 ContextWindow = 128000 }
+    "5" = @{ Name = "SiliconFlow";        Url = "https://api.siliconflow.cn/v1/chat/completions";        Model = "deepseek-ai/DeepSeek-V3"; ContextWindow = 128000 }
+    "6" = @{ Name = "OpenAI (官方)";      Url = "https://api.openai.com/v1/chat/completions";            Model = "gpt-4o";                  ContextWindow = 128000 }
+    "7" = @{ Name = "自定义";             Url = "";                                                       Model = "";                        ContextWindow = 0 }
+    "0" = @{ Name = "仅改 Key/模型/端口"; Url = "";                                                       Model = "";                        ContextWindow = 0 }
 }
 
 Write-Host "═══ 选择新 Provider ═══" -ForegroundColor Cyan
@@ -84,6 +85,36 @@ if ($choice -ne "0") {
 $p = Read-Host "端口 [当前: $newPort, 回车不变]"
 if ($p) { $newPort = $p }
 
+# ── 上下文窗口 ────────────────────────────────────
+$currentContext = if ($currentConfig['ADAPTER_CONTEXT_WINDOW']) { [int]$currentConfig['ADAPTER_CONTEXT_WINDOW'] } else { 0 }
+$currentCompact = if ($currentConfig['ADAPTER_AUTO_COMPACT_LIMIT']) { [int]$currentConfig['ADAPTER_AUTO_COMPACT_LIMIT'] } else { 0 }
+$newContext = $currentContext
+$newCompact = $currentCompact
+
+if ($choice -ne "0") {
+    $presetCtx = $Providers[$choice].ContextWindow
+    if ($presetCtx -gt 0) {
+        Write-Host "  模型上下文窗口: $presetCtx tokens" -ForegroundColor Cyan
+        $ctxInput = Read-Host "  确认或自定义 [回车确认 / 输入数值]"
+        if ($ctxInput) { $newContext = [int]$ctxInput } else { $newContext = $presetCtx }
+    } else {
+        $ctxInput = Read-Host "  上下文窗口 (当前: $currentContext, 0=不限)"
+        if ($ctxInput) { $newContext = [int]$ctxInput }
+    }
+} else {
+    $ctxInput = Read-Host "  上下文窗口 (当前: $currentContext, 回车不变)"
+    if ($ctxInput) { $newContext = [int]$ctxInput }
+}
+
+if ($newContext -gt 0) {
+    $defaultCompact = [math]::Floor($newContext * 0.8)
+    $compactInput = Read-Host "  自动压缩阈值 [当前: $currentCompact, 默认80%=$defaultCompact]"
+    if ($compactInput) { $newCompact = [int]$compactInput }
+    elseif ($currentCompact -eq 0 -or $choice -ne "0") { $newCompact = $defaultCompact }
+} else {
+    $newCompact = 0
+}
+
 # 写配置
 $envContent = @"
 ADAPTER_HOST=127.0.0.1
@@ -93,6 +124,8 @@ ADAPTER_MODEL=$newModel
 ADAPTER_API_KEY=$newKey
 ADAPTER_RETRY_MAX=$($currentConfig['ADAPTER_RETRY_MAX'])
 ADAPTER_RETRY_DELAY=$($currentConfig['ADAPTER_RETRY_DELAY'])
+ADAPTER_CONTEXT_WINDOW=$newContext
+ADAPTER_AUTO_COMPACT_LIMIT=$newCompact
 "@
 Set-Content -Path $ConfigFile -Value $envContent -Encoding UTF8
 
@@ -110,5 +143,6 @@ Write-Host "✅ 已切换并重启" -ForegroundColor Green
 Write-Host "  上游: $newUrl" -ForegroundColor Cyan
 Write-Host "  模型: $newModel" -ForegroundColor Cyan
 Write-Host "  端口: $newPort" -ForegroundColor Cyan
+Write-Host "  上下文: $newContext tokens (压缩阈值: $newCompact)" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "⚠️  请重启 Codex 生效" -ForegroundColor Yellow
