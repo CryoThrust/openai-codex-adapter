@@ -6,7 +6,7 @@
 
 ```bash
 # 克隆后安装
-git clone https://github.com/yourname/openai-codex-adapter.git
+git clone https://github.com/CryoThrust/openai-codex-adapter.git
 cd openai-codex-adapter
 bash install.sh
 ```

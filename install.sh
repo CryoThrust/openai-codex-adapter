@@ -148,7 +148,7 @@ elif [[ -f "$(dirname "$0")/adapter.py" ]]; then
     cp "$(dirname "$0")/adapter.py" "$INSTALL_DIR/adapter.py"
 else
     info "从 GitHub 下载适配器..."
-    curl -fsSL "https://raw.githubusercontent.com/yourname/openai-codex-adapter/main/adapter.py" \
+    curl -fsSL "https://raw.githubusercontent.com/CryoThrust/openai-codex-adapter/main/adapter.py" \
          -o "$INSTALL_DIR/adapter.py" || die "下载失败，请手动下载 adapter.py"
 fi
 ok "适配器已安装"
