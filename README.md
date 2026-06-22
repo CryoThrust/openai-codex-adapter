@@ -74,7 +74,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubus
 请输入编号 [1-7]:
 ```
 
-选完后输入 API Key 和模型名称，脚本会自动完成剩余一切：安装适配器、注册开机自启、启动服务、（如果有 CC Switch）集成 provider。
+选完后输入 API Key 和模型名称，脚本会自动完成剩余一切：安装适配器、注册开机自启、启动服务、自动配置 Codex、（如果有 CC Switch）集成 provider。
 
 ## 支持的 Provider
 
@@ -119,7 +119,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubus
 
 **卸载时**会自动把 CC Switch 切回你之前的 provider，不留残留。
 
-没有 CC Switch？完全没问题。适配器是独立的，CC Switch 只是一个可选的增强。
+没有 CC Switch？完全没问题。适配器是独立的，安装时同样会自动配置 Codex `config.toml`。CC Switch 只是一个可选的 GUI 增强层。
 
 ## 切换 Provider
 
@@ -155,9 +155,16 @@ powershell -File "$env:USERPROFILE\.openai-codex-adapter\switch.ps1"
 
 重启电脑后适配器会自动起来，无需手动操作。
 
-## 手动配置 Codex（无 CC Switch）
+## 自动配置 Codex
 
-如果你没有 CC Switch，需要手动编辑 `~/.codex/config.toml`：
+安装时会自动询问是否配置 Codex `config.toml`——不管你有没有 CC Switch，都会自动写入：
+
+- `model_provider` → `"custom"`
+- `model` → 你选择的模型名
+- `base_url` → 适配器地址
+- `ANTHROPIC_AUTH_TOKEN` → 你的 API Key
+
+如果你选择跳过自动配置，或需要手动调整，可以编辑 `~/.codex/config.toml`：
 
 ```toml
 model_provider = "custom"
@@ -168,11 +175,8 @@ name = "custom"
 wire_api = "responses"
 requires_openai_auth = true
 base_url = "http://127.0.0.1:18666/v1"
-```
 
-然后在 `[shell_environment_policy.set]` 中添加：
-
-```toml
+[shell_environment_policy.set]
 ANTHROPIC_AUTH_TOKEN = "your-api-key"
 ```
 

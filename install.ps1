@@ -162,6 +162,64 @@ Start-ScheduledTask -TaskName $TaskName
 
 Write-Host "[OK] 开机自启已配置 (计划任务: $TaskName)" -ForegroundColor Green
 
+# ── 自动配置 Codex ──────────────────────────────────────
+$codex_configured = $false
+Write-Host ""
+$codex_choice = Read-Host "是否自动配置 Codex config.toml？[Y/n]"
+if ($codex_choice -ne "n" -and $codex_choice -ne "N") {
+    Write-Host "[INFO] 配置 Codex ..." -ForegroundColor Cyan
+    $configPath = "$CodexDir\config.toml"
+    $authPath = "$CodexDir\auth.json"
+    New-Item -ItemType Directory -Force -Path $CodexDir | Out-Null
+
+    if (Test-Path $configPath) {
+        Copy-Item $configPath "$configPath.bak" -Force
+        $existing = Get-Content $configPath -Raw -ErrorAction SilentlyContinue
+        if ($existing) {
+            $existing = $existing -replace "model_provider\s*=.*", "model_provider = `"custom`""
+            $existing = $existing -replace "^model\s*=.*", "model = `"$model`""
+            if ($existing -notmatch "\[model_providers\.custom\]") {
+                if ($existing -match "\[model_providers\]") {
+                    $existing = $existing -replace "\[model_providers\]", "[model_providers]`n[model_providers.custom]`nname = `"custom`"`nwire_api = `"responses`"`nrequires_openai_auth = true`nbase_url = `"http://127.0.0.1:$port/v1`""
+                } else {
+                    $existing += "`n`n[model_providers]`n[model_providers.custom]`nname = `"custom`"`nwire_api = `"responses`"`nrequires_openai_auth = true`nbase_url = `"http://127.0.0.1:$port/v1`""
+                }
+            } else {
+                $existing = $existing -replace "base_url\s*=.*", "base_url = `"http://127.0.0.1:$port/v1`""
+                $existing = $existing -replace "wire_api\s*=.*", "wire_api = `"responses`""
+            }
+            if ($existing -match "ANTHROPIC_AUTH_TOKEN") {
+                $existing = $existing -replace "ANTHROPIC_AUTH_TOKEN\s*=.*", "ANTHROPIC_AUTH_TOKEN = `"$apiKey`""
+            } elseif ($existing -match "\[shell_environment_policy\.set\]") {
+                $existing = $existing -replace "\[shell_environment_policy\.set\]", "[shell_environment_policy.set]`nANTHROPIC_AUTH_TOKEN = `"$apiKey`""
+            }
+            Set-Content -Path $configPath -Value $existing -Encoding UTF8
+        }
+    } else {
+        $freshConfig = @"
+model_provider = "custom"
+model = "$model"
+
+[model_providers]
+[model_providers.custom]
+name = "custom"
+wire_api = "responses"
+requires_openai_auth = true
+base_url = "http://127.0.0.1:$port/v1"
+
+[shell_environment_policy]
+inherit = "core"
+
+[shell_environment_policy.set]
+ANTHROPIC_AUTH_TOKEN = "$apiKey"
+"@
+        Set-Content -Path $configPath -Value $freshConfig -Encoding UTF8
+    }
+    @{ OPENAI_API_KEY = $apiKey } | ConvertTo-Json | Set-Content -Path $authPath -Encoding UTF8
+    $codex_configured = $true
+    Write-Host "[OK] Codex 已配置" -ForegroundColor Green
+}
+
 # ── 等待服务就绪 ──────────────────────────────────────
 Write-Host "[INFO] 等待服务就绪..." -ForegroundColor Cyan
 for ($i = 0; $i -lt 15; $i++) {
@@ -184,13 +242,17 @@ Write-Host "  模型:      $model" -ForegroundColor Cyan
 Write-Host "  适配器:    http://127.0.0.1:$port" -ForegroundColor Cyan
 Write-Host "  健康检查:  curl http://127.0.0.1:$port/health" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  Codex 配置 — 在 $CodexDir\config.toml 中:" -ForegroundColor Yellow
-Write-Host "    model_provider = `"custom`"" -ForegroundColor Green
-Write-Host "    model = `"$model`"" -ForegroundColor Green
-Write-Host "    [model_providers.custom]" -ForegroundColor Green
-Write-Host "    wire_api = `"responses`"" -ForegroundColor Green
-Write-Host "    requires_openai_auth = true" -ForegroundColor Green
-Write-Host "    base_url = `"http://127.0.0.1:$port/v1`"" -ForegroundColor Green
+if ($codex_configured) {
+    Write-Host "  Codex config.toml 已自动配置" -ForegroundColor Green
+} else {
+    Write-Host "  Codex config.toml 未配置，请手动编辑 $CodexDir\config.toml" -ForegroundColor Yellow
+    Write-Host "    model_provider = `"custom`"" -ForegroundColor Green
+    Write-Host "    model = `"$model`"" -ForegroundColor Green
+    Write-Host "    [model_providers.custom]" -ForegroundColor Green
+    Write-Host "    wire_api = `"responses`"" -ForegroundColor Green
+    Write-Host "    requires_openai_auth = true" -ForegroundColor Green
+    Write-Host "    base_url = `"http://127.0.0.1:$port/v1`"" -ForegroundColor Green
+}
 Write-Host ""
 Write-Host "  管理命令:" -ForegroundColor White
 Write-Host "    启动:  $InstallDir\start.bat" -ForegroundColor Cyan

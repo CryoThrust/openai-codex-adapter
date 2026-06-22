@@ -188,6 +188,95 @@ for i in $(seq 1 15); do
 done
 ok "服务已启动"
 
+# ── 自动配置 Codex ────────────────────────────────────
+CODEX_CONFIGURED=false
+echo ""
+echo -ne "${YELLOW}是否自动配置 Codex config.toml？[Y/n]${NC}: "
+read -r codex_choice
+if [[ "$codex_choice" != "n" && "$codex_choice" != "N" ]]; then
+    info "配置 Codex ..."
+    python3 << PYCODEX
+import json, re
+from pathlib import Path
+
+codex_dir = Path("$CODEX_DIR")
+config_path = codex_dir / "config.toml"
+api_key = "$API_KEY"
+model = "$MODEL"
+port = "$PORT"
+base_url = f"http://127.0.0.1:{port}/v1"
+
+codex_dir.mkdir(parents=True, exist_ok=True)
+
+# Backup existing config
+if config_path.exists():
+    backup = config_path.with_suffix(f".toml.bak")
+    config_path.rename(backup)
+
+# Read existing config if exists (from backup)
+existing = ""
+if backup.exists():
+    existing = backup.read_text(encoding="utf-8")
+
+# If config exists, patch it; otherwise write fresh
+if existing:
+    # Update model_provider
+    existing = re.sub(r"^model_provider\s*=.*", "model_provider = \"custom\"", existing, flags=re.MULTILINE)
+    # Update model
+    existing = re.sub(r"^model\s*=.*", f"model = \"{model}\"", existing, flags=re.MULTILINE)
+
+    # Find or create [model_providers.custom] section
+    if "[model_providers.custom]" not in existing:
+        # Find [model_providers] and add custom section after it
+        if "[model_providers]" in existing:
+            existing = existing.replace(
+                "[model_providers]",
+                f"[model_providers]\n[model_providers.custom]\nname = \"custom\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nbase_url = \"{base_url}\""
+            )
+        else:
+            existing += f"\n\n[model_providers]\n[model_providers.custom]\nname = \"custom\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nbase_url = \"{base_url}\""
+    else:
+        existing = re.sub(r"base_url\s*=.*", f"base_url = \"{base_url}\"", existing, flags=re.MULTILINE)
+        existing = re.sub(r"wire_api\s*=.*", "wire_api = \"responses\"", existing, flags=re.MULTILINE)
+
+    # Update ANTHROPIC_AUTH_TOKEN in shell_environment_policy.set
+    if "ANTHROPIC_AUTH_TOKEN" in existing:
+        existing = re.sub(r"ANTHROPIC_AUTH_TOKEN\s*=.*", f"ANTHROPIC_AUTH_TOKEN = \"{api_key}\"", existing, flags=re.MULTILINE)
+    else:
+        # Add to shell_environment_policy.set section
+        if "[shell_environment_policy.set]" in existing:
+            existing = existing.replace(
+                "[shell_environment_policy.set]",
+                f"[shell_environment_policy.set]\nANTHROPIC_AUTH_TOKEN = \"{api_key}\""
+            )
+
+    config_path.write_text(existing, encoding="utf-8")
+else:
+    # Write fresh minimal config
+    config = f"""model_provider = "custom"
+model = "{model}"
+
+[model_providers]
+[model_providers.custom]
+name = "custom"
+wire_api = "responses"
+requires_openai_auth = true
+base_url = "{base_url}"
+
+[shell_environment_policy]
+inherit = "core"
+
+[shell_environment_policy.set]
+ANTHROPIC_AUTH_TOKEN = "{api_key}"
+"""
+    config_path.write_text(config, encoding="utf-8")
+
+print("  Codex config written")
+PYCODEX
+    CODEX_CONFIGURED=true
+    ok "Codex 已配置"
+fi
+
 # ── CC Switch 集成 ────────────────────────────────────
 CC_INTEGRATED=false
 if [[ -f "$CC_SWITCH_DB" ]]; then
