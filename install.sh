@@ -1,60 +1,57 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════════
-# OpenAI-Codex Adapter 一键安装脚本
-# 用法: curl -fsSL <URL>/install.sh | bash
-#   或: bash install.sh
+# OpenAI-Codex Adapter — macOS 一键安装
+# 用法: curl -fsSL https://gitee.com/kangarooking/openai-codex-adapter/raw/main/install.sh | bash
 # ═══════════════════════════════════════════════════════════════════
-set -e
+set -euo pipefail
 
 INSTALL_DIR="$HOME/.openai-codex-adapter"
-PLIST_NAME="com.openai-codex-adapter"
-PLIST_PATH="$HOME/Library/LaunchAgents/$PLIST_NAME.plist"
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PLIST_LABEL="com.openai-codex-adapter"
+PLIST_PATH="$HOME/Library/LaunchAgents/${PLIST_LABEL}.plist"
+CC_SWITCH_DIR="$HOME/.cc-switch"
+CC_SWITCH_DB="$CC_SWITCH_DIR/cc-switch.db"
+CODEX_DIR="$HOME/.codex"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
-
 info()  { echo -e "${CYAN}[INFO]${NC} $1"; }
 ok()    { echo -e "${GREEN}[OK]${NC} $1"; }
-warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
 die()   { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 
 # ── 预设 Provider ─────────────────────────────────────
-declare -A PROVIDER_URLS PROVIDER_MODELS PROVIDER_NAMES
-PROVIDER_NAMES=(
-  [deepseek]="DeepSeek"
-  [xfyun]="讯飞星辰 (Xfyun)"
-  [ollama]="Ollama (本地)"
-  [lmstudio]="LM Studio (本地)"
-  [siliconflow]="SiliconFlow"
-  [openai]="OpenAI (官方)"
-  [custom]="自定义 (Custom)"
+declare -A P_URLS P_MODELS P_NAMES
+P_NAMES=(
+  [1]="DeepSeek"
+  [2]="讯飞星辰 (Xfyun)"
+  [3]="Ollama (本地)"
+  [4]="LM Studio (本地)"
+  [5]="SiliconFlow"
+  [6]="OpenAI (官方)"
+  [7]="自定义 (Custom)"
 )
-PROVIDER_URLS=(
-  [deepseek]="https://api.deepseek.com/v1/chat/completions"
-  [xfyun]="https://maas-coding-api.cn-huabei-1.xf-yun.com/v2/chat/completions"
-  [ollama]="http://127.0.0.1:11434/v1/chat/completions"
-  [lmstudio]="http://127.0.0.1:1234/v1/chat/completions"
-  [siliconflow]="https://api.siliconflow.cn/v1/chat/completions"
-  [openai]="https://api.openai.com/v1/chat/completions"
-  [custom]=""
+P_URLS=(
+  [1]="https://api.deepseek.com/v1/chat/completions"
+  [2]="https://maas-coding-api.cn-huabei-1.xf-yun.com/v2/chat/completions"
+  [3]="http://127.0.0.1:11434/v1/chat/completions"
+  [4]="http://127.0.0.1:1234/v1/chat/completions"
+  [5]="https://api.siliconflow.cn/v1/chat/completions"
+  [6]="https://api.openai.com/v1/chat/completions"
+  [7]=""
 )
-PROVIDER_MODELS=(
-  [deepseek]="deepseek-chat"
-  [xfyun]="astron-code-latest"
-  [ollama]="qwen2.5-coder:7b"
-  [lmstudio]="default"
-  [siliconflow]="deepseek-ai/DeepSeek-V3"
-  [openai]="gpt-4o"
-  [custom]=""
+P_MODELS=(
+  [1]="deepseek-chat"
+  [2]="astron-code-latest"
+  [3]="qwen2.5-coder:7b"
+  [4]="default"
+  [5]="deepseek-ai/DeepSeek-V3"
+  [6]="gpt-4o"
+  [7]=""
 )
 
 # ── 检查环境 ──────────────────────────────────────────
-info "检查环境..."
-[[ "$(uname)" != "Darwin" ]] && die "目前仅支持 macOS，Linux 请参考 README 手动配置 systemd"
+[[ "$(uname -s)" != "Darwin" ]] && die "macOS only. Windows 请使用 install.ps1"
 PYTHON3="$(command -v python3 || true)"
-[[ -z "$PYTHON3" ]] && die "未找到 python3，请先安装: brew install python3"
-info "Python: $($PYTHON3 --version 2>&1)"
+[[ -z "$PYTHON3" ]] && die "未找到 python3"
 
 # ── 选择 Provider ─────────────────────────────────────
 echo ""
@@ -64,92 +61,77 @@ echo -e "${BOLD}${CYAN}═══════════════════
 echo ""
 echo -e "请选择 API Provider:"
 echo ""
-i=1
-keys=(deepseek xfyun ollama lmstudio siliconflow openai custom)
-for k in "${keys[@]}"; do
-    echo -e "  ${BOLD}${i})${NC} ${PROVIDER_NAMES[$k]}"
-    i=$((i+1))
+for i in 1 2 3 4 5 6 7; do
+    echo -e "  ${BOLD}${i})${NC} ${P_NAMES[$i]}"
 done
 echo ""
-echo -ne "请输入编号 [1-${#keys[@]}]: "
+echo -ne "请输入编号 [1-7]: "
 read -r choice
+[[ "$choice" =~ ^[1-7]$ ]] || die "无效选择"
 
-if ! [[ "$choice" =~ ^[0-9]+$ ]] || [[ "$choice" -lt 1 ]] || [[ "$choice" -gt ${#keys[@]} ]]; then
-    die "无效选择"
-fi
-
-SELECTED="${keys[$((choice-1))]}"
-SELECTED_NAME="${PROVIDER_NAMES[$SELECTED]}"
-UPSTREAM="${PROVIDER_URLS[$SELECTED]}"
-DEFAULT_MODEL="${PROVIDER_MODELS[$SELECTED]}"
-
+SELECTED="$choice"
+SELECTED_NAME="${P_NAMES[$SELECTED]}"
+UPSTREAM="${P_URLS[$SELECTED]}"
+DEFAULT_MODEL="${P_MODELS[$SELECTED]}"
 ok "已选择: $SELECTED_NAME"
 
 # ── 自定义 URL ────────────────────────────────────────
-if [[ "$SELECTED" == "custom" ]]; then
+if [[ "$SELECTED" == "7" ]]; then
     echo ""
-    echo -e "请输入 API 地址 (如 https://api.example.com/v1/chat/completions):"
+    echo -ne "API 地址 (如 https://api.example.com/v1/chat/completions): "
     read -r UPSTREAM
-    [[ -z "$UPSTREAM" ]] && die "API 地址不能为空"
+    [[ -z "$UPSTREAM" ]] && die "不能为空"
 fi
 
-# ── 自定义 Model ──────────────────────────────────────
+# ── Model ─────────────────────────────────────────────
 echo ""
 if [[ -n "$DEFAULT_MODEL" ]]; then
     echo -ne "模型名称 [默认: $DEFAULT_MODEL]: "
     read -r MODEL
-    [[ -z "$MODEL" ]] && MODEL="$DEFAULT_MODEL"
+    MODEL="${MODEL:-$DEFAULT_MODEL}"
 else
     echo -ne "模型名称: "
     read -r MODEL
-    [[ -z "$MODEL" ]] && die "模型名称不能为空"
+    [[ -z "$MODEL" ]] && die "不能为空"
 fi
 
 # ── API Key ───────────────────────────────────────────
 NEED_KEY=true
-if [[ "$SELECTED" == "ollama" || "$SELECTED" == "lmstudio" ]]; then
+if [[ "$SELECTED" == "3" || "$SELECTED" == "4" ]]; then
     NEED_KEY=false
     API_KEY="local-no-key"
 fi
-
 if $NEED_KEY; then
     echo ""
-    if [[ -n "$ADAPTER_API_KEY" ]]; then
-        API_KEY="$ADAPTER_API_KEY"
-        info "从环境变量读取 API Key"
-    else
-        echo -ne "API Key${YELLOW} (输入时不会回显)${NC}: "
-        read -rs API_KEY
-        echo ""
-        [[ -z "$API_KEY" ]] && die "API Key 不能为空"
-    fi
+    echo -ne "API Key${YELLOW} (输入不回显)${NC}: "
+    stty -echo 2>/dev/null || true
+    read -r API_KEY
+    stty echo 2>/dev/null || true
+    echo ""
+    [[ -z "$API_KEY" ]] && die "不能为空"
 fi
 
 # ── 端口 ──────────────────────────────────────────────
-PORT="${ADAPTER_PORT:-18666}"
+PORT="18666"
 echo ""
-echo -ne "适配器端口 [默认: $PORT]: "
+echo -ne "端口 [默认: $PORT]: "
 read -r input_port
 [[ -n "$input_port" ]] && PORT="$input_port"
 
-# ── 重试配置 ──────────────────────────────────────────
-RETRY_MAX="${ADAPTER_RETRY_MAX:-5}"
-RETRY_DELAY="${ADAPTER_RETRY_DELAY:-2.0}"
-
 # ── 安装文件 ──────────────────────────────────────────
-echo ""
 info "安装到 $INSTALL_DIR ..."
 mkdir -p "$INSTALL_DIR"
 
-# 复制适配器（优先从同目录，否则从网络下载）
+# 下载/复制 adapter.py
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 if [[ -f "$SCRIPT_DIR/adapter.py" ]]; then
     cp "$SCRIPT_DIR/adapter.py" "$INSTALL_DIR/adapter.py"
-elif [[ -f "$(dirname "$0")/adapter.py" ]]; then
-    cp "$(dirname "$0")/adapter.py" "$INSTALL_DIR/adapter.py"
 else
-    info "从 GitHub 下载适配器..."
-    curl -fsSL "https://raw.githubusercontent.com/CryoThrust/openai-codex-adapter/main/adapter.py" \
-         -o "$INSTALL_DIR/adapter.py" || die "下载失败，请手动下载 adapter.py"
+    GITEE_URL="https://gitee.com/CryoThrust/openai-codex-adapter/raw/main/adapter.py"
+    GH_URL="https://raw.githubusercontent.com/CryoThrust/openai-codex-adapter/main/adapter.py"
+    curl -fsSL "$GITEE_URL" -o "$INSTALL_DIR/adapter.py" 2>/dev/null || \
+    curl -fsSL "$GH_URL" -o "$INSTALL_DIR/adapter.py" 2>/dev/null || \
+    die "下载 adapter.py 失败"
 fi
 ok "适配器已安装"
 
@@ -160,133 +142,155 @@ ADAPTER_PORT=$PORT
 ADAPTER_UPSTREAM=$UPSTREAM
 ADAPTER_MODEL=$MODEL
 ADAPTER_API_KEY=$API_KEY
-ADAPTER_RETRY_MAX=$RETRY_MAX
-ADAPTER_RETRY_DELAY=$RETRY_DELAY
+ADAPTER_RETRY_MAX=5
+ADAPTER_RETRY_DELAY=2.0
 ENV
 ok "配置已写入"
 
-# 写启动脚本
-cat > "$INSTALL_DIR/start.sh" << 'STARTEOF'
-#!/bin/bash
-source "$(dirname "$0")/config.env"
-export ADAPTER_HOST ADAPTER_PORT ADAPTER_UPSTREAM ADAPTER_MODEL ADAPTER_API_KEY
-export ADAPTER_RETRY_MAX ADAPTER_RETRY_DELAY
-exec python3 "$(dirname "$0")/adapter.py"
-STARTEOF
-chmod +x "$INSTALL_DIR/start.sh"
-
-# 写停止脚本
-cat > "$INSTALL_DIR/stop.sh" << 'STOPEOF'
-#!/bin/bash
-PLIST="$HOME/Library/LaunchAgents/com.openai-codex-adapter.plist"
-if [[ -f "$PLIST" ]]; then
-    launchctl unload "$PLIST" 2>/dev/null || true
-fi
-pkill -f "adapter.py" 2>/dev/null || true
-echo "✅ 适配器已停止"
-STOPEOF
-chmod +x "$INSTALL_DIR/stop.sh"
-
-# 写卸载脚本
-cat > "$INSTALL_DIR/uninstall.sh" << 'UNINSTALLEOF'
-#!/bin/bash
-echo "确定要卸载 OpenAI-Codex Adapter? [y/N]"
-read -r confirm
-[[ "$confirm" != "y" && "$confirm" != "Y" ]] && echo "已取消" && exit 0
-PLIST="$HOME/Library/LaunchAgents/com.openai-codex-adapter.plist"
-[[ -f "$PLIST" ]] && launchctl unload "$PLIST" 2>/dev/null && rm -f "$PLIST"
-rm -rf "$HOME/.openai-codex-adapter"
-echo "✅ 已卸载"
-UNINSTALLEOF
-chmod +x "$INSTALL_DIR/uninstall.sh"
-
-# 写 Codex 配置脚本
-cat > "$INSTALL_DIR/config-codex.sh" << 'CODEXCFGEOF'
-#!/bin/bash
-CONFIG="$HOME/.codex/config.toml"
-source "$(dirname "$0")/config.env"
-[[ ! -f "$CONFIG" ]] && echo "未找到 $CONFIG" && exit 1
-cp "$CONFIG" "$CONFIG.bak.$(date +%Y%m%d%H%M%S)"
-python3 << PY
-import re, os
-p = os.path.expanduser("~/.codex/config.toml")
-with open(p) as f: c = f.read()
-env = {}
-with open(os.path.expanduser("~/.openai-codex-adapter/config.env")) as f:
-    for line in f:
-        line = line.strip()
-        if "=" in line and not line.startswith("#"):
-            k, v = line.split("=", 1)
-            env[k.strip()] = v.strip()
-port = env.get("ADAPTER_PORT", "18666")
-model = env.get("ADAPTER_MODEL", "")
-api_key = env.get("ADAPTER_API_KEY", "")
-c = re.sub(r'^model_provider\s*=.*', 'model_provider = "custom"', c, flags=re.MULTILINE)
-c = re.sub(r'^model\s*=.*', f'model = "{model}"', c, flags=re.MULTILINE)
-c = re.sub(r'base_url\s*=.*', f'base_url = "http://127.0.0.1:{port}/v1"', c, flags=re.MULTILINE)
-c = re.sub(r'ANTHROPIC_AUTH_TOKEN\s*=.*', f'ANTHROPIC_AUTH_TOKEN = "{api_key}"', c, flags=re.MULTILINE)
-with open(p, "w") as f: f.write(c)
-print("✅ Codex 配置已更新")
-PY
-CODEXCFGEOF
-chmod +x "$INSTALL_DIR/config-codex.sh"
-
-# ── LaunchAgent ───────────────────────────────────────
+# ── LaunchAgent (开机自启 + 崩溃重启) ─────────────────
 mkdir -p "$HOME/Library/LaunchAgents"
-
 cat > "$PLIST_PATH" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>$PLIST_NAME</string>
+    <string>${PLIST_LABEL}</string>
     <key>ProgramArguments</key>
     <array>
-        <string>$PYTHON3</string>
-        <string>$INSTALL_DIR/adapter.py</string>
+        <string>${PYTHON3}</string>
+        <string>${INSTALL_DIR}/adapter.py</string>
     </array>
     <key>EnvironmentVariables</key>
     <dict>
-        <key>ADAPTER_HOST</key>
-        <string>127.0.0.1</string>
-        <key>ADAPTER_PORT</key>
-        <string>$PORT</string>
-        <key>ADAPTER_UPSTREAM</key>
-        <string>$UPSTREAM</string>
-        <key>ADAPTER_MODEL</key>
-        <string>$MODEL</string>
-        <key>ADAPTER_API_KEY</key>
-        <string>$API_KEY</string>
-        <key>ADAPTER_RETRY_MAX</key>
-        <string>$RETRY_MAX</string>
-        <key>ADAPTER_RETRY_DELAY</key>
-        <string>$RETRY_DELAY</string>
+        <key>ADAPTER_HOST</key><string>127.0.0.1</string>
+        <key>ADAPTER_PORT</key><string>${PORT}</string>
+        <key>ADAPTER_UPSTREAM</key><string>${UPSTREAM}</string>
+        <key>ADAPTER_MODEL</key><string>${MODEL}</string>
+        <key>ADAPTER_API_KEY</key><string>${API_KEY}</string>
+        <key>ADAPTER_RETRY_MAX</key><string>5</string>
+        <key>ADAPTER_RETRY_DELAY</key><string>2.0</string>
     </dict>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>StandardOutPath</key>
-    <string>$INSTALL_DIR/adapter.log</string>
-    <key>StandardErrorPath</key>
-    <string>$INSTALL_DIR/adapter.log</string>
+    <key>RunAtLoad</key><true/>
+    <key>KeepAlive</key><true/>
+    <key>StandardOutPath</key><string>${INSTALL_DIR}/adapter.log</string>
+    <key>StandardErrorPath</key><string>${INSTALL_DIR}/adapter.log</string>
 </dict>
 </plist>
 PLIST
-ok "开机自启已配置"
 
-# ── 启动 ──────────────────────────────────────────────
 launchctl unload "$PLIST_PATH" 2>/dev/null || true
 launchctl load "$PLIST_PATH"
 info "等待服务就绪..."
 for i in $(seq 1 15); do
-    if curl -s "http://127.0.0.1:$PORT/health" 2>/dev/null | grep -q "ok"; then
-        ok "服务已就绪 ✓"
-        break
-    fi
+    curl -s "http://127.0.0.1:$PORT/health" 2>/dev/null | grep -q "ok" && break
     sleep 1
 done
+ok "服务已启动"
+
+# ── CC Switch 集成 ────────────────────────────────────
+CC_INTEGRATED=false
+if [[ -f "$CC_SWITCH_DB" ]]; then
+    echo ""
+    echo -ne "${YELLOW}检测到 CC Switch，是否自动集成？(在 CC Switch 里新增 Provider) [Y/n]${NC}: "
+    read -r cc_choice
+    if [[ "$cc_choice" != "n" && "$cc_choice" != "N" ]]; then
+        info "集成 CC Switch ..."
+        PROVIDER_ID="openai-codex-adapter"
+        BASE_URL="http://127.0.0.1:${PORT}/v1"
+        python3 << PYCC
+import json, sqlite3, time
+from pathlib import Path
+
+db = Path("$CC_SWITCH_DB")
+con = sqlite3.connect(str(db))
+now = int(time.time() * 1000)
+app_type = "codex"
+provider_id = "$PROVIDER_ID"
+base_url = "$BASE_URL"
+api_key = "$API_KEY"
+model = "$MODEL"
+port = "$PORT"
+
+config = f'''model = "{model}"
+model_provider = "openai_codex_adapter"
+
+[model_providers]
+[model_providers.openai_codex_adapter]
+name = "OpenAI Codex Adapter"
+base_url = "{base_url}"
+wire_api = "responses"
+requires_openai_auth = true
+request_max_retries = 2
+stream_max_retries = 2
+stream_idle_timeout_ms = 300000'''
+
+settings = {"auth": {"OPENAI_API_KEY": api_key}, "config": config}
+meta = {"provider_url": "$UPSTREAM", "provider_model": model, "port": port}
+
+# backfill current provider
+local_settings_path = Path("$CC_SWITCH_DIR/settings.json")
+try:
+    local_settings = json.loads(local_settings_path.read_text()) if local_settings_path.exists() else {}
+except: local_settings = {}
+current_id = local_settings.get("currentProviderCodex")
+if current_id and current_id != provider_id:
+    row = con.execute("select settings_config from providers where app_type=? and id=?", (app_type, current_id)).fetchone()
+    if row:
+        try: cs = json.loads(row[0] or "{}")
+        except: cs = {}
+        codex_config = Path("$CODEX_DIR/config.toml")
+        codex_auth = Path("$CODEX_DIR/auth.json")
+        live_config = codex_config.read_text() if codex_config.exists() else ""
+        live_auth = json.loads(codex_auth.read_text()) if codex_auth.exists() else {}
+        if live_config and "openai_codex_adapter" not in live_config:
+            cs["config"] = live_config
+            cs["auth"] = live_auth
+            con.execute("update providers set settings_config=? where app_type=? and id=?",
+                        (json.dumps(cs, ensure_ascii=False, separators=(",",":")), app_type, current_id))
+except Exception as e:
+    print(f"  backfill skip: {e}")
+
+max_sort = con.execute("select coalesce(max(sort_index),-1) from providers where app_type=?", (app_type,)).fetchone()[0]
+con.execute("""insert into providers (
+    id, app_type, name, settings_config, website_url, category, created_at, sort_index,
+    notes, icon, icon_color, meta, is_current, in_failover_queue, cost_multiplier,
+    limit_daily_usd, limit_monthly_usd, provider_type
+) values (?,?,?,?,?,?,?,?,?,?,?, ?,0,0,'1.0',NULL,NULL,NULL)
+on conflict(id, app_type) do update set
+    name=excluded.name, settings_config=excluded.settings_config,
+    notes=excluded.notes, meta=excluded.meta""",
+    (provider_id, app_type, "OpenAI Codex Adapter",
+     json.dumps(settings, ensure_ascii=False, separators=(",",":")),
+     "", "third_party", now, max_sort+1,
+     "Local adapter: Responses API -> Chat Completions. Auto-retry on transient errors.",
+     "custom-icon", "#2563EB", json.dumps(meta, ensure_ascii=False, separators=(",",":"))))
+
+con.execute("delete from provider_endpoints where provider_id=? and app_type=?", (provider_id, app_type))
+con.execute("insert into provider_endpoints(provider_id, app_type, url, added_at) values (?,?,?,?)",
+            (provider_id, app_type, base_url, now))
+
+# set as current
+con.execute("update providers set is_current=0 where app_type=?", (app_type,))
+con.execute("update providers set is_current=1 where app_type=? and id=?", (app_type, provider_id))
+local_settings["currentProviderCodex"] = provider_id
+local_settings_path.write_text(json.dumps(local_settings, ensure_ascii=False, indent=2) + "\n")
+
+# write live codex config
+codex_dir = Path("$CODEX_DIR")
+codex_dir.mkdir(parents=True, exist_ok=True)
+(codex_dir / "config.toml").write_text(config + "\n")
+(codex_dir / "auth.json").write_text(json.dumps({"OPENAI_API_KEY": api_key}, ensure_ascii=False, indent=2) + "\n")
+
+con.commit()
+con.close()
+print("  CC Switch integration done")
+PYCC
+        CC_INTEGRATED=true
+        ok "CC Switch 已集成"
+        open -a "CC Switch" >/dev/null 2>&1 || true
+    fi
+fi
 
 # ── 完成 ──────────────────────────────────────────────
 echo ""
@@ -298,28 +302,27 @@ echo -e "  Provider:  ${CYAN}$SELECTED_NAME${NC}"
 echo -e "  上游地址:  ${CYAN}$UPSTREAM${NC}"
 echo -e "  模型:      ${CYAN}$MODEL${NC}"
 echo -e "  适配器:    ${CYAN}http://127.0.0.1:$PORT${NC}"
+echo -e "  健康检查:  ${CYAN}curl http://127.0.0.1:$PORT/health${NC}"
 echo ""
-echo -e "  ${BOLD}Codex 配置${NC} — 在 ${YELLOW}~/.codex/config.toml${NC} 中设置:"
+if $CC_INTEGRATED; then
+echo -e "  ${GREEN}CC Switch 已集成，直接在 CC Switch 里切换 Provider 即可${NC}"
+echo -e "  重启 Codex 生效"
+else
+echo -e "  ${YELLOW}手动配置 Codex:${NC}"
+echo -e "  在 ${CYAN}~/.codex/config.toml${NC} 中:"
+echo -e "    ${GREEN}model_provider = \"custom\""
+echo -e "    model = \"$MODEL\""
+echo -e "    [model_providers.custom]"
+echo -e "    wire_api = \"responses\""
+echo -e "    requires_openai_auth = true"
+echo -e "    base_url = \"http://127.0.0.1:$PORT/v1\"${NC}"
 echo ""
-echo -e "  ${GREEN}model_provider = \"custom\""
-echo -e "  model = \"$MODEL\""
-echo -e ""
-echo -e "  [model_providers.custom]"
-echo -e "  name = \"custom\""
-echo -e "  wire_api = \"responses\""
-echo -e "  requires_openai_auth = true"
-echo -e "  base_url = \"http://127.0.0.1:$PORT/v1\"${NC}"
-echo ""
-if $NEED_KEY; then
-echo -e "  并在 ${YELLOW}[shell_environment_policy.set]${NC} 添加:"
-echo -e "  ${GREEN}ANTHROPIC_AUTH_TOKEN = \"你的API Key\"${NC}"
-echo ""
+echo -e "  在 ${CYAN}[shell_environment_policy.set]${NC} 添加:"
+echo -e "    ${GREEN}ANTHROPIC_AUTH_TOKEN = \"你的API Key\"${NC}"
 fi
-echo -e "  或运行自动配置: ${CYAN}bash $INSTALL_DIR/config-codex.sh${NC}"
 echo ""
 echo -e "  ${BOLD}管理命令:${NC}"
-echo -e "    健康检查: ${CYAN}curl http://127.0.0.1:$PORT/health${NC}"
-echo -e "    查看日志: ${CYAN}tail -f $INSTALL_DIR/adapter.log${NC}"
-echo -e "    重启服务: ${CYAN}bash $INSTALL_DIR/stop.sh && launchctl load $PLIST_PATH${NC}"
-echo -e "    卸载:     ${CYAN}bash $INSTALL_DIR/uninstall.sh${NC}"
+echo -e "    查看日志:  ${CYAN}tail -f $INSTALL_DIR/adapter.log${NC}"
+echo -e "    切换配置:  ${CYAN}bash $INSTALL_DIR/switch.sh${NC}"
+echo -e "    卸载:      ${CYAN}bash $INSTALL_DIR/uninstall.sh${NC}"
 echo ""

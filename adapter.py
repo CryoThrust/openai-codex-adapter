@@ -3,6 +3,7 @@
 OpenAI Chat Completions → Codex Responses API 通用适配器
 支持任何 OpenAI 兼容 API (DeepSeek / 讯飞 / Ollama / LMStudio / 任意自建)
 内置自动重试钩子，遇到瞬态错误自动指数退避重试
+跨平台: macOS / Windows / Linux
 """
 import json
 import os
@@ -31,6 +32,7 @@ RETRY_KEYWORDS = [
     "Inference failed", "rate_limit", "overloaded", "capacity",
     "temporarily unavailable", "please retry", "try again",
 ]
+
 
 # ── 工具函数 ──────────────────────────────────────────
 def extract_text(value):
@@ -227,7 +229,6 @@ class Handler(BaseHTTPRequestHandler):
             traceback.print_exc()
             self._json(500, {"error": str(exc)})
 
-    # ── 上游请求 + 重试 ─────────────────────────────
     def _upstream_req(self, auth, body):
         req = urllib.request.Request(
             UPSTREAM,
@@ -286,7 +287,6 @@ class Handler(BaseHTTPRequestHandler):
                 last_err = str(err)
         raise urllib.error.HTTPError(UPSTREAM, 503, f"Max retries exhausted: {last_err[:300]}", None, None)
 
-    # ── 响应处理 ─────────────────────────────────────
     def _handle_non_stream(self, auth, upstream_body):
         try:
             data = self._fetch_with_retry(auth, upstream_body)
@@ -372,17 +372,17 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     if not UPSTREAM:
-        print("❌ ADAPTER_UPSTREAM 未设置，请运行安装脚本或设置环境变量", flush=True)
+        print("ERROR: ADAPTER_UPSTREAM not set. Run install script or set env var.", flush=True)
         sys.exit(1)
     if not UPSTREAM_MODEL:
-        print("❌ ADAPTER_MODEL 未设置，请运行安装脚本或设置环境变量", flush=True)
+        print("ERROR: ADAPTER_MODEL not set. Run install script or set env var.", flush=True)
         sys.exit(1)
 
     httpd = ThreadingHTTPServer((HOST, PORT), Handler)
-    print(f"🚀 OpenAI-Codex Adapter on http://{HOST}:{PORT}", flush=True)
-    print(f"   upstream: {UPSTREAM}", flush=True)
-    print(f"   model:    {UPSTREAM_MODEL}", flush=True)
-    print(f"   retry:    max {RETRY_MAX}, base delay {RETRY_DELAY}s", flush=True)
+    print(f"OpenAI-Codex Adapter on http://{HOST}:{PORT}", flush=True)
+    print(f"  upstream: {UPSTREAM}", flush=True)
+    print(f"  model:    {UPSTREAM_MODEL}", flush=True)
+    print(f"  retry:    max {RETRY_MAX}, base delay {RETRY_DELAY}s", flush=True)
     httpd.serve_forever()
 
 

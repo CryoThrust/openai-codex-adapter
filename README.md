@@ -1,61 +1,99 @@
 # OpenAI-Codex Adapter
 
-把任何 **OpenAI Chat Completions 兼容 API** 桥接到 **Codex Responses API** 格式，内置自动重试钩子。
+把任何 **OpenAI Chat Completions 兼容 API** 桥接到 **Codex Responses API**，内置自动重试钩子。支持 macOS / Windows。
 
 ## 一键安装
 
+**macOS：**
+
 ```bash
-# 克隆后安装
-git clone https://github.com/CryoThrust/openai-codex-adapter.git
-cd openai-codex-adapter
-bash install.sh
+curl -fsSL https://raw.githubusercontent.com/CryoThrust/openai-codex-adapter/main/install.sh | bash
+```
+
+**Windows (PowerShell)：**
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/CryoThrust/openai-codex-adapter/main/install.ps1 | iex"
 ```
 
 安装向导会交互式引导你选择 Provider、输入 API Key 等。
 
 ## 支持的 Provider
 
-| Provider | 预设地址 | 默认模型 |
-|----------|---------|---------|
-| DeepSeek | `api.deepseek.com/v1/chat/completions` | `deepseek-chat` |
-| 讯飞星辰 | `maas-coding-api.cn-huabei-1.xf-yun.com/v2/chat/completions` | `astron-code-latest` |
-| Ollama (本地) | `127.0.0.1:11434/v1/chat/completions` | `qwen2.5-coder:7b` |
-| LM Studio (本地) | `127.0.0.1:1234/v1/chat/completions` | `default` |
-| SiliconFlow | `api.siliconflow.cn/v1/chat/completions` | `DeepSeek-V3` |
-| OpenAI (官方) | `api.openai.com/v1/chat/completions` | `gpt-4o` |
-| **自定义** | 任意 URL | 任意模型 |
+| # | Provider | 默认模型 |
+|---|----------|---------|
+| 1 | DeepSeek | `deepseek-chat` |
+| 2 | 讯飞星辰 (Xfyun) | `astron-code-latest` |
+| 3 | Ollama (本地) | `qwen2.5-coder:7b` |
+| 4 | LM Studio (本地) | `default` |
+| 5 | SiliconFlow | `deepseek-ai/DeepSeek-V3` |
+| 6 | OpenAI (官方) | `gpt-4o` |
+| 7 | **自定义** | 任意 |
+
+选择"自定义"可以填任意 URL，所以任何 OpenAI Chat Completions 兼容 API 都能用。
 
 ## 工作原理
 
 ```
 Codex CLI
-  │  发出 Responses API 请求 (wire_api = "responses")
+  │  Responses API 请求 (wire_api = "responses")
   ▼
-┌─────────────────────────────────┐
-│  Adapter (Python, :18666)       │
-│                                  │
-│  1. Responses → Chat Completions │
-│  2. 发送到上游 API               │
-│  3. 遇到瞬态错误自动重试          │
-│  4. Chat Completions → Responses │
-└─────────────────────────────────┘
+┌──────────────────────────────────┐
+│  Adapter (Python, :18666)        │
+│                                   │
+│  1. Responses → Chat Completions  │
+│  2. 发送到上游 API                │
+│  3. 瞬态错误自动指数退避重试       │
+│  4. Chat Completions → Responses  │
+└──────────────────────────────────┘
   │
   ▼
   任何 OpenAI 兼容 API
-  (DeepSeek / 讯飞 / Ollama / ...)
 ```
 
-**为什么需要这个？** Codex 只支持 `wire_api = "responses"`，`wire_api = "chat"` 已废弃。而绝大多数第三方 API 只提供 Chat Completions 格式，所以需要适配器做格式转换。
+Codex 只支持 `wire_api = "responses"`，而绝大多数第三方 API 只有 Chat Completions 格式，所以需要适配器做格式转换。
+
+## CC Switch 集成
+
+如果你装了 CC Switch，安装脚本会自动：
+- 在 CC Switch 的 provider 列表里新增 "OpenAI Codex Adapter"
+- 切换到该 provider 并写入 Codex 配置
+- 把你之前的 provider 配置回填保存，方便之后切回
+
+之后想切换，直接在 CC Switch 的 GUI 里切就行。
+
+卸载时也会自动切回 CC Switch 里的其他 provider。
+
+## 开机自启
+
+- **macOS**: LaunchAgent (`RunAtLoad` + `KeepAlive`)，开机自动启动，崩溃自动重启
+- **Windows**: 计划任务 (`AtLogOn`)，登录自动启动，失败自动重试 3 次
+
+重启电脑不用管，服务会自动起来。
+
+## 切换 Provider
+
+**macOS：**
+
+```bash
+bash ~/.openai-codex-adapter/switch.sh
+```
+
+**Windows (PowerShell)：**
+
+```powershell
+powershell -File "$env:USERPROFILE\.openai-codex-adapter\switch.ps1"
+```
+
+切换后自动重启适配器，CC Switch 也会同步更新。记得重启 Codex。
 
 ## 重试钩子
 
-遇到以下错误自动指数退避重试（2s→4s→8s→16s→32s）：
+遇到以下错误自动指数退避重试（2s→4s→8s→16s→32s，最多 5 次）：
 
 - HTTP 400 + 关键词：`ModelArts.81001`、`EngineInternalError`、`chat template failed`、`Inference failed`、`rate_limit`、`overloaded`、`capacity`、`temporarily unavailable`、`please retry`、`try again`
 - HTTP 429（限流）
 - HTTP 500/502/503/504（服务端错误）
-
-最多重试 5 次，可通过环境变量调整。
 
 ## 环境变量
 
@@ -65,65 +103,42 @@ Codex CLI
 | `ADAPTER_PORT` | `18666` | 监听端口 |
 | `ADAPTER_UPSTREAM` | — | 上游 API 地址（必填） |
 | `ADAPTER_MODEL` | — | 模型名称（必填） |
-| `ADAPTER_API_KEY` | — | API Key（通过 Authorization 头传递给上游） |
+| `ADAPTER_API_KEY` | — | API Key |
 | `ADAPTER_RETRY_MAX` | `5` | 最大重试次数 |
 | `ADAPTER_RETRY_DELAY` | `2.0` | 基础退避延迟（秒） |
 
-## Codex 配置
-
-在 `~/.codex/config.toml` 中：
-
-```toml
-model_provider = "custom"
-model = "your-model-name"
-
-[model_providers.custom]
-name = "custom"
-wire_api = "responses"
-requires_openai_auth = true
-base_url = "http://127.0.0.1:18666/v1"
-```
-
-在 `[shell_environment_policy.set]` 中：
-
-```toml
-ANTHROPIC_AUTH_TOKEN = "your-api-key"
-```
-
 ## 管理命令
 
+| 操作 | macOS | Windows |
+|------|-------|---------|
+| 健康检查 | `curl http://127.0.0.1:18666/health` | 同左 |
+| 查看日志 | `tail -f ~/.openai-codex-adapter/adapter.log` | `type %USERPROFILE%\.openai-codex-adapter\adapter.log` |
+| 切换 | `bash ~/.openai-codex-adapter/switch.sh` | `powershell -File switch.ps1` |
+| 卸载 | `bash ~/.openai-codex-adapter/uninstall.sh` | `powershell -File uninstall.ps1` |
+
+## 卸载
+
+**macOS：**
+
 ```bash
-# 健康检查
-curl http://127.0.0.1:18666/health
-
-# 查看日志
-tail -f ~/.openai-codex-adapter/adapter.log
-
-# 停止
-bash ~/.openai-codex-adapter/stop.sh
-
-# 启动
-launchctl load ~/Library/LaunchAgents/com.openai-codex-adapter.plist
-
-# 卸载
 bash ~/.openai-codex-adapter/uninstall.sh
-
-# 自动配置 Codex
-bash ~/.openai-codex-adapter/config-codex.sh
 ```
 
-## 文件结构
+**Windows (PowerShell)：**
 
+```powershell
+powershell -File "$env:USERPROFILE\.openai-codex-adapter\uninstall.ps1"
 ```
-~/.openai-codex-adapter/
-├── adapter.py          # 适配器主程序
-├── config.env          # 环境变量配置
-├── start.sh            # 手动启动
-├── stop.sh             # 停止服务
-├── uninstall.sh        # 卸载
-├── config-codex.sh     # 自动配置 Codex
-└── adapter.log         # 运行日志
-```
+
+macOS 卸载时会自动把 CC Switch 切回其他 provider。
+
+## 致谢
+
+灵感来自 [kangarooking/xfyun-codex-adapter](https://gitee.com/kangarooking/xfyun-codex-adapter)，在其基础上增加了：
+- 多 Provider 支持（DeepSeek / 讯飞 / Ollama / 任意自定义 URL）
+- 自动重试钩子
+- Windows 支持
+- 切换脚本
 
 ## License
 
