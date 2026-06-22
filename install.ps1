@@ -8,6 +8,49 @@ $InstallDir = "$env:USERPROFILE\.openai-codex-adapter"
 $TaskName = "OpenAI-Codex-Adapter"
 $CodexDir = "$env:USERPROFILE\.codex"
 
+# ── 已安装检测 ────────────────────────────────────────
+if (Test-Path "$InstallDir\config.env") {
+    $currentConfig = @{}
+    Get-Content "$InstallDir\config.env" | Where-Object { $_ -notmatch "^\s*#" -and $_ -match "=" } | ForEach-Object {
+        $parts = $_ -split "=", 2
+        $currentConfig[$parts[0].Trim()] = $parts[1].Trim()
+    }
+
+    $healthStatus = "stopped"
+    try {
+        $r = Invoke-WebRequest -Uri "http://127.0.0.1:$($currentConfig['ADAPTER_PORT'])/health" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+        if ($r.Content -match "ok") { $healthStatus = "running" }
+    } catch { }
+
+    Write-Host ""
+    Write-Host "═══ 检测到已安装 ═══" -ForegroundColor Yellow
+    Write-Host "  上游: $($currentConfig['ADAPTER_UPSTREAM'])" -ForegroundColor Cyan
+    Write-Host "  模型: $($currentConfig['ADAPTER_MODEL'])" -ForegroundColor Cyan
+    Write-Host "  端口: $($currentConfig['ADAPTER_PORT'])" -ForegroundColor Cyan
+    Write-Host "  状态: $healthStatus" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  1) 重新配置 (切换 Provider / 修改 API Key)" -ForegroundColor White
+    Write-Host "  2) 卸载" -ForegroundColor White
+    Write-Host "  3) 取消退出" -ForegroundColor White
+    Write-Host ""
+    $reinstallChoice = Read-Host "请选择 [1-3]"
+
+    switch ($reinstallChoice) {
+        "1" {
+            Write-Host "[INFO] 重新配置..." -ForegroundColor Cyan
+            Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+        }
+        "2" {
+            & powershell -File "$InstallDir\uninstall.ps1"
+            exit 0
+        }
+        default {
+            Write-Host "已取消"
+            exit 0
+        }
+    }
+}
+
 # ── 预设 Provider ─────────────────────────────────────
 $Providers = [ordered]@{
     "1" = @{ Name = "DeepSeek";          Url = "https://api.deepseek.com/v1/chat/completions";           Model = "deepseek-chat" }

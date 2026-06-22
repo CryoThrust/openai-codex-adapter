@@ -53,6 +53,39 @@ P_MODELS=(
 PYTHON3="$(command -v python3 || true)"
 [[ -z "$PYTHON3" ]] && die "未找到 python3"
 
+# ── 已安装检测 ────────────────────────────────────────
+if [[ -d "$INSTALL_DIR" && -f "$INSTALL_DIR/config.env" ]]; then
+    source "$INSTALL_DIR/config.env"
+    echo ""
+    echo -e "${BOLD}${YELLOW}═══ 检测到已安装 ═══${NC}"
+    echo -e "  上游: ${CYAN}$ADAPTER_UPSTREAM${NC}"
+    echo -e "  模型: ${CYAN}$ADAPTER_MODEL${NC}"
+    echo -e "  端口: ${CYAN}$ADAPTER_PORT${NC}"
+    echo -e "  状态: ${CYAN}$(curl -s "http://127.0.0.1:$ADAPTER_PORT/health" 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print('running' if d.get('ok') else 'stopped')" 2>/dev/null || echo "stopped")${NC}"
+    echo ""
+    echo -e "  ${BOLD}1)${NC} 重新配置 (切换 Provider / 修改 API Key)"
+    echo -e "  ${BOLD}2)${NC} 卸载"
+    echo -e "  ${BOLD}3)${NC} 取消退出"
+    echo ""
+    echo -ne "请选择 [1-3]: "
+    read -r reinstall_choice
+    case "$reinstall_choice" in
+        1)
+            info "重新配置..."
+            # 停止当前服务
+            launchctl unload "$PLIST_PATH" 2>/dev/null || true
+            # 继续往下走安装流程（会覆盖 config.env 和 LaunchAgent）
+            ;;
+        2)
+            exec bash "$INSTALL_DIR/uninstall.sh"
+            ;;
+        *)
+            echo "已取消"
+            exit 0
+            ;;
+    esac
+fi
+
 # ── 选择 Provider ─────────────────────────────────────
 echo ""
 echo -e "${BOLD}${CYAN}═══════════════════════════════════════════════${NC}"
