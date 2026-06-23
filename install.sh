@@ -273,24 +273,15 @@ if backup.exists():
 
 # If config exists, patch it; otherwise write fresh
 if existing:
-    # Update model_provider
-    existing = re.sub(r"^model_provider\s*=.*", "model_provider = \"custom\"", existing, flags=re.MULTILINE)
+    # Update model_provider to openai (unified bucket, preserves history)
+    existing = re.sub(r"^model_provider\s*=.*", 'model_provider = "openai"', existing, flags=re.MULTILINE)
     # Update model
-    existing = re.sub(r"^model\s*=.*", f"model = \"{model}\"", existing, flags=re.MULTILINE)
-
-    # Find or create [model_providers.custom] section
-    if "[model_providers.custom]" not in existing:
-        # Find [model_providers] and add custom section after it
-        if "[model_providers]" in existing:
-            existing = existing.replace(
-                "[model_providers]",
-                f"[model_providers]\n[model_providers.custom]\nname = \"custom\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nbase_url = \"{base_url}\""
-            )
-        else:
-            existing += f"\n\n[model_providers]\n[model_providers.custom]\nname = \"custom\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nbase_url = \"{base_url}\""
+    existing = re.sub(r"^model\s*=.*", f'model = "{model}"', existing, flags=re.MULTILINE)
+    # Add openai_base_url (use built-in openai provider with custom relay)
+    if "openai_base_url" in existing:
+        existing = re.sub(r"^openai_base_url\s*=.*", f'openai_base_url = "{base_url}"', existing, flags=re.MULTILINE)
     else:
-        existing = re.sub(r"base_url\s*=.*", f"base_url = \"{base_url}\"", existing, flags=re.MULTILINE)
-        existing = re.sub(r"wire_api\s*=.*", "wire_api = \"responses\"", existing, flags=re.MULTILINE)
+        existing = re.sub(r"^(model_provider\s*=.*\n)", f'\\1openai_base_url = "{base_url}"\n', existing, flags=re.MULTILINE)
 
     # Update ANTHROPIC_AUTH_TOKEN in shell_environment_policy.set
     if "ANTHROPIC_AUTH_TOKEN" in existing:
@@ -310,16 +301,10 @@ else:
     auto_compact = "$AUTO_COMPACT_LIMIT"
     ctx_line = f"\nmodel_context_window = {context_window}\nmodel_auto_compact_token_limit = {auto_compact}" if int(context_window) > 0 else ""
 
-    config = f"""model_provider = "custom"
+    config = f"""model_provider = "openai"
+openai_base_url = "{base_url}"
 model = "{model}"
 {ctx_line.lstrip(chr(10)) if ctx_line else ""}
-[model_providers]
-[model_providers.custom]
-name = "custom"
-wire_api = "responses"
-requires_openai_auth = true
-base_url = "{base_url}"
-{"model_context_window = " + context_window + chr(10) + "model_auto_compact_token_limit = " + auto_compact if int(context_window) > 0 else ""}
 [shell_environment_policy]
 inherit = "core"
 
@@ -359,17 +344,8 @@ model = "$MODEL"
 port = "$PORT"
 
 config = f'''model = "{model}"
-model_provider = "openai_codex_adapter"
-
-[model_providers]
-[model_providers.openai_codex_adapter]
-name = "OpenAI Codex Adapter"
-base_url = "{base_url}"
-wire_api = "responses"
-requires_openai_auth = true
-request_max_retries = 2
-stream_max_retries = 2
-stream_idle_timeout_ms = 300000'''
+model_provider = "openai"
+openai_base_url = "{base_url}"'''
 
 settings = {"auth": {"OPENAI_API_KEY": api_key}, "config": config}
 meta = {"provider_url": "$UPSTREAM", "provider_model": model, "port": port}
@@ -430,31 +406,17 @@ local_settings_path.write_text(json.dumps(local_settings, ensure_ascii=False, in
 codex_dir = Path("$CODEX_DIR")
 codex_dir.mkdir(parents=True, exist_ok=True)
 codex_config = codex_dir / "config.toml"
-provider_section = "openai_codex_adapter"
 
 if codex_config.exists():
     existing = codex_config.read_text(encoding="utf-8")
-    # Update model and model_provider
+    # Update model and model_provider to openai (unified bucket)
     existing = re.sub(r"^model\s*=.*", f'model = "{model}"', existing, flags=re.MULTILINE)
-    existing = re.sub(r"^model_provider\s*=.*", f'model_provider = "{provider_section}"', existing, flags=re.MULTILINE)
-    # Find or create [model_providers.openai_codex_adapter] section
-    section_header = f"[model_providers.{provider_section}]"
-    if section_header not in existing:
-        adapter_block = f'''{section_header}
-name = "OpenAI Codex Adapter"
-base_url = "{base_url}"
-wire_api = "responses"
-requires_openai_auth = true
-request_max_retries = 2
-stream_max_retries = 2
-stream_idle_timeout_ms = 300000'''
-        if "[model_providers]" in existing:
-            existing = existing.replace("[model_providers]", f"[model_providers]\n{adapter_block}")
-        else:
-            existing += f"\n\n[model_providers]\n{adapter_block}"
+    existing = re.sub(r"^model_provider\s*=.*", 'model_provider = "openai"', existing, flags=re.MULTILINE)
+    # Add or update openai_base_url
+    if "openai_base_url" in existing:
+        existing = re.sub(r"^openai_base_url\s*=.*", f'openai_base_url = "{base_url}"', existing, flags=re.MULTILINE)
     else:
-        existing = re.sub(r"base_url\s*=.*", f'base_url = "{base_url}"', existing, flags=re.MULTILINE)
-        existing = re.sub(r"wire_api\s*=.*", 'wire_api = "responses"', existing, flags=re.MULTILINE)
+        existing = re.sub(r"^(model_provider\s*=.*\n)", f'\\1openai_base_url = "{base_url}"\n', existing, flags=re.MULTILINE)
     codex_config.write_text(existing, encoding="utf-8")
 else:
     codex_config.write_text(config + "\n")
@@ -489,14 +451,11 @@ echo -e "  重启 Codex 生效"
 else
 echo -e "  ${YELLOW}手动配置 Codex:${NC}"
 echo -e "  在 ${CYAN}~/.codex/config.toml${NC} 中:"
-echo -e "    ${GREEN}model_provider = \"custom\""
+echo -e "    ${GREEN}model_provider = \"openai\""
+echo -e "    openai_base_url = \"http://127.0.0.1:$PORT/v1\""
 echo -e "    model = \"$MODEL\""
 echo -e "    model_context_window = $CONTEXT_WINDOW"
-echo -e "    model_auto_compact_token_limit = $AUTO_COMPACT_LIMIT"
-echo -e "    [model_providers.custom]"
-echo -e "    wire_api = \"responses\""
-echo -e "    requires_openai_auth = true"
-echo -e "    base_url = \"http://127.0.0.1:$PORT/v1\"${NC}"
+echo -e "    model_auto_compact_token_limit = $AUTO_COMPACT_LIMIT${NC}"
 echo ""
 echo -e "  在 ${CYAN}[shell_environment_policy.set]${NC} 添加:"
 echo -e "    ${GREEN}ANTHROPIC_AUTH_TOKEN = \"你的API Key\"${NC}"

@@ -246,16 +246,10 @@ if ($codex_choice -ne "n" -and $codex_choice -ne "N") {
             $ctxLines = "model_context_window = $contextWindow`nmodel_auto_compact_token_limit = $autoCompactLimit`n"
         }
         $freshConfig = @"
-model_provider = "custom"
+model_provider = "openai"
+openai_base_url = "http://127.0.0.1:$port/v1"
 model = "$model"
 $ctxLines
-[model_providers]
-[model_providers.custom]
-name = "custom"
-wire_api = "responses"
-requires_openai_auth = true
-base_url = "http://127.0.0.1:$port/v1"
-$(if ($contextWindow -gt 0) { "model_context_window = $contextWindow`nmodel_auto_compact_token_limit = $autoCompactLimit" })
 [shell_environment_policy]
 inherit = "core"
 

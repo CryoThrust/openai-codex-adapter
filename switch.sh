@@ -21,27 +21,15 @@ echo -e "  端口: ${GREEN}$ADAPTER_PORT${NC}"
 echo -e "  上下文: ${GREEN}${ADAPTER_CONTEXT_WINDOW:-0} tokens (压缩: ${ADAPTER_AUTO_COMPACT_LIMIT:-0})${NC}"
 echo ""
 
-declare -A P_URLS P_MODELS P_NAMES
-P_NAMES=(
-  [1]="DeepSeek" [2]="讯飞星辰" [3]="Ollama (本地)" [4]="LM Studio (本地)"
-  [5]="SiliconFlow" [6]="OpenAI (官方)" [7]="自定义" [0]="仅改 Key/模型/端口"
-)
-P_URLS=(
-  [1]="https://api.deepseek.com/v1/chat/completions"
-  [2]="https://maas-coding-api.cn-huabei-1.xf-yun.com/v2/chat/completions"
-  [3]="http://127.0.0.1:11434/v1/chat/completions"
-  [4]="http://127.0.0.1:1234/v1/chat/completions"
-  [5]="https://api.siliconflow.cn/v1/chat/completions"
-  [6]="https://api.openai.com/v1/chat/completions"
-  [7]=""
-)
-P_MODELS=(
-  [1]="deepseek-chat" [2]="astron-code-latest" [3]="qwen2.5-coder:7b"
-  [4]="default" [5]="deepseek-ai/DeepSeek-V3" [6]="gpt-4o" [7]=""
-)
+# (bash 3.2 兼容: 用函数代替 declare -A 关联数组)
+
+_pname() { case $1 in 0) echo "仅改 Key/模型/端口";; 1) echo "DeepSeek";; 2) echo "讯飞星辰";; 3) echo "Ollama (本地)";; 4) echo "LM Studio (本地)";; 5) echo "SiliconFlow";; 6) echo "OpenAI (官方)";; 7) echo "自定义";; esac; }
+_purl()  { case $1 in 1) echo "https://api.deepseek.com/v1/chat/completions";; 2) echo "https://maas-coding-api.cn-huabei-1.xf-yun.com/v2/chat/completions";; 3) echo "http://127.0.0.1:11434/v1/chat/completions";; 4) echo "http://127.0.0.1:1234/v1/chat/completions";; 5) echo "https://api.siliconflow.cn/v1/chat/completions";; 6) echo "https://api.openai.com/v1/chat/completions";; 7) echo "";; esac; }
+_pmodel() { case $1 in 1) echo "deepseek-chat";; 2) echo "astron-code-latest";; 3) echo "qwen2.5-coder:7b";; 4) echo "default";; 5) echo "deepseek-ai/DeepSeek-V3";; 6) echo "gpt-4o";; 7) echo "";; esac; }
+_pctx()  { case $1 in 1) echo "128000";; 2) echo "200000";; 3) echo "128000";; 4) echo "128000";; 5) echo "128000";; 6) echo "128000";; 7) echo "0";; esac; }
 
 echo -e "${BOLD}${CYAN}═══ 选择新 Provider ═══${NC}"
-for i in 0 1 2 3 4 5 6 7; do echo -e "  ${BOLD}${i})${NC} ${P_NAMES[$i]}"; done
+for i in 0 1 2 3 4 5 6 7; do echo -e "  ${BOLD}${i})${NC} $(_pname $i)"; done
 echo ""
 echo -ne "请输入编号 [0-7]: "
 read -r choice
@@ -53,9 +41,9 @@ if [[ "$choice" != "0" ]]; then
     if [[ "$choice" == "7" ]]; then
         echo -ne "API 地址: "; read -r NEW_URL; [[ -z "$NEW_URL" ]] && exit 1
     else
-        NEW_URL="${P_URLS[$choice]}"
+        NEW_URL="$(_purl $choice)"
     fi
-    DEFAULT_M="${P_MODELS[$choice]}"
+    DEFAULT_M="$(_pmodel $choice)"
     if [[ -n "$DEFAULT_M" ]]; then
         echo -ne "模型 [默认: $DEFAULT_M]: "; read -r m; NEW_MODEL="${m:-$DEFAULT_M}"
     else
@@ -80,7 +68,7 @@ NEW_CONTEXT="$CURRENT_CONTEXT"
 NEW_COMPACT="$CURRENT_COMPACT"
 
 if [[ "$choice" != "0" ]]; then
-    PRESET_CTX="${P_CONTEXT[$choice]:-0}"
+    PRESET_CTX="$(_pctx $choice)"
     if [[ "$PRESET_CTX" -gt 0 ]]; then
         echo ""
         echo -e "  ${BOLD}模型上下文窗口:${NC} ${CYAN}${PRESET_CTX} tokens${NC}"
@@ -168,17 +156,8 @@ now = int(__import__('time').time() * 1000)
 app_type = "codex"
 provider_id = "$PROVIDER_ID"
 config = f'''model = "$NEW_MODEL"
-model_provider = "openai_codex_adapter"
-
-[model_providers]
-[model_providers.openai_codex_adapter]
-name = "OpenAI Codex Adapter"
-base_url = "http://127.0.0.1:$NEW_PORT/v1"
-wire_api = "responses"
-requires_openai_auth = true
-request_max_retries = 2
-stream_max_retries = 2
-stream_idle_timeout_ms = 300000
+model_provider = "openai"
+openai_base_url = "http://127.0.0.1:$NEW_PORT/v1"
 model_context_window = "$NEW_CONTEXT"
 model_auto_compact_token_limit = "$NEW_COMPACT"'''
 settings = {"auth": {"OPENAI_API_KEY": "$NEW_KEY"}, "config": config}
@@ -199,10 +178,22 @@ on conflict(id, app_type) do update set
 con.execute("delete from provider_endpoints where provider_id=? and app_type=?", (provider_id, app_type))
 con.execute("insert into provider_endpoints(provider_id, app_type, url, added_at) values (?,?,?,?)",
             (provider_id, app_type, f"http://127.0.0.1:$NEW_PORT/v1", now))
-# write live config
+# write live config — patch existing, never overwrite
 codex_dir = Path("$HOME/.codex")
 codex_dir.mkdir(parents=True, exist_ok=True)
-(codex_dir / "config.toml").write_text(config + "\n")
+codex_config = codex_dir / "config.toml"
+import re
+if codex_config.exists():
+    existing = codex_config.read_text(encoding="utf-8")
+    existing = re.sub(r"^model\s*=.*", f'model = "$NEW_MODEL"', existing, flags=re.MULTILINE)
+    existing = re.sub(r"^model_provider\s*=.*", 'model_provider = "openai"', existing, flags=re.MULTILINE)
+    if "openai_base_url" in existing:
+        existing = re.sub(r"^openai_base_url\s*=.*", f'openai_base_url = "http://127.0.0.1:$NEW_PORT/v1"', existing, flags=re.MULTILINE)
+    else:
+        existing = re.sub(r"^(model_provider\s*=.*\n)", f'\\1openai_base_url = "http://127.0.0.1:$NEW_PORT/v1"\n', existing, flags=re.MULTILINE)
+    codex_config.write_text(existing, encoding="utf-8")
+else:
+    codex_config.write_text(config + "\n")
 (codex_dir / "auth.json").write_text(json.dumps({"OPENAI_API_KEY": "$NEW_KEY"}, ensure_ascii=False, indent=2) + "\n")
 con.commit(); con.close()
 PYCC
