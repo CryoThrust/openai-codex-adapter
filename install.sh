@@ -345,7 +345,7 @@ if [[ -f "$CC_SWITCH_DB" ]]; then
         PROVIDER_ID="openai-codex-adapter"
         BASE_URL="http://127.0.0.1:${PORT}/v1"
         python3 << PYCC
-import json, sqlite3, time
+import json, sqlite3, time, re
 from pathlib import Path
 
 db = Path("$CC_SWITCH_DB")
@@ -426,10 +426,38 @@ con.execute("update providers set is_current=1 where app_type=? and id=?", (app_
 local_settings["currentProviderCodex"] = provider_id
 local_settings_path.write_text(json.dumps(local_settings, ensure_ascii=False, indent=2) + "\n")
 
-# write live codex config
+# write live codex config — patch existing, never overwrite
 codex_dir = Path("$CODEX_DIR")
 codex_dir.mkdir(parents=True, exist_ok=True)
-(codex_dir / "config.toml").write_text(config + "\n")
+codex_config = codex_dir / "config.toml"
+provider_section = "openai_codex_adapter"
+
+if codex_config.exists():
+    existing = codex_config.read_text(encoding="utf-8")
+    # Update model and model_provider
+    existing = re.sub(r"^model\s*=.*", f'model = "{model}"', existing, flags=re.MULTILINE)
+    existing = re.sub(r"^model_provider\s*=.*", f'model_provider = "{provider_section}"', existing, flags=re.MULTILINE)
+    # Find or create [model_providers.openai_codex_adapter] section
+    section_header = f"[model_providers.{provider_section}]"
+    if section_header not in existing:
+        adapter_block = f'''{section_header}
+name = "OpenAI Codex Adapter"
+base_url = "{base_url}"
+wire_api = "responses"
+requires_openai_auth = true
+request_max_retries = 2
+stream_max_retries = 2
+stream_idle_timeout_ms = 300000'''
+        if "[model_providers]" in existing:
+            existing = existing.replace("[model_providers]", f"[model_providers]\n{adapter_block}")
+        else:
+            existing += f"\n\n[model_providers]\n{adapter_block}"
+    else:
+        existing = re.sub(r"base_url\s*=.*", f'base_url = "{base_url}"', existing, flags=re.MULTILINE)
+        existing = re.sub(r"wire_api\s*=.*", 'wire_api = "responses"', existing, flags=re.MULTILINE)
+    codex_config.write_text(existing, encoding="utf-8")
+else:
+    codex_config.write_text(config + "\n")
 (codex_dir / "auth.json").write_text(json.dumps({"OPENAI_API_KEY": api_key}, ensure_ascii=False, indent=2) + "\n")
 
 con.commit()
