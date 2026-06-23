@@ -19,46 +19,15 @@ ok()    { echo -e "${GREEN}[OK]${NC} $1"; }
 die()   { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 
 # ── 预设 Provider ─────────────────────────────────────
-declare -A P_URLS P_MODELS P_NAMES
-P_NAMES=(
-  [1]="DeepSeek"
-  [2]="讯飞星辰 (Xfyun)"
-  [3]="Ollama (本地)"
-  [4]="LM Studio (本地)"
-  [5]="SiliconFlow"
-  [6]="OpenAI (官方)"
-  [7]="自定义 (Custom)"
-)
-P_URLS=(
-  [1]="https://api.deepseek.com/v1/chat/completions"
-  [2]="https://maas-coding-api.cn-huabei-1.xf-yun.com/v2/chat/completions"
-  [3]="http://127.0.0.1:11434/v1/chat/completions"
-  [4]="http://127.0.0.1:1234/v1/chat/completions"
-  [5]="https://api.siliconflow.cn/v1/chat/completions"
-  [6]="https://api.openai.com/v1/chat/completions"
-  [7]=""
-)
-P_MODELS=(
-  [1]="deepseek-chat"
-  [2]="astron-code-latest"
-  [3]="qwen2.5-coder:7b"
-  [4]="default"
-  [5]="deepseek-ai/DeepSeek-V3"
-  [6]="gpt-4o"
-  [7]=""
-)
+# (bash 3.2 兼容: 用函数代替 declare -A 关联数组)
+
+_pname() { case $1 in 1) echo "DeepSeek";; 2) echo "讯飞星辰 (Xfyun)";; 3) echo "Ollama (本地)";; 4) echo "LM Studio (本地)";; 5) echo "SiliconFlow";; 6) echo "OpenAI (官方)";; 7) echo "自定义 (Custom)";; esac; }
+_purl()  { case $1 in 1) echo "https://api.deepseek.com/v1/chat/completions";; 2) echo "https://maas-coding-api.cn-huabei-1.xf-yun.com/v2/chat/completions";; 3) echo "http://127.0.0.1:11434/v1/chat/completions";; 4) echo "http://127.0.0.1:1234/v1/chat/completions";; 5) echo "https://api.siliconflow.cn/v1/chat/completions";; 6) echo "https://api.openai.com/v1/chat/completions";; 7) echo "";; esac; }
+_pmodel() { case $1 in 1) echo "deepseek-chat";; 2) echo "astron-code-latest";; 3) echo "qwen2.5-coder:7b";; 4) echo "default";; 5) echo "deepseek-ai/DeepSeek-V3";; 6) echo "gpt-4o";; 7) echo "";; esac; }
+_pctx()  { case $1 in 1) echo "128000";; 2) echo "200000";; 3) echo "128000";; 4) echo "128000";; 5) echo "128000";; 6) echo "128000";; 7) echo "0";; esac; }
 
 # ── 模型上下文窗口预设 (token 数) ──────────────────
-declare -A P_CONTEXT
-P_CONTEXT=(
-  [1]="128000"
-  [2]="200000"
-  [3]="128000"
-  [4]="128000"
-  [5]="128000"
-  [6]="128000"
-  [7]="0"
-)
+# (已合并到 _pctx 函数)
 
 # ── 检查环境 ──────────────────────────────────────────
 [[ "$(uname -s)" != "Darwin" ]] && die "macOS only. Windows 请使用 install.ps1"
@@ -107,7 +76,7 @@ echo ""
 echo -e "请选择 API Provider:"
 echo ""
 for i in 1 2 3 4 5 6 7; do
-    echo -e "  ${BOLD}${i})${NC} ${P_NAMES[$i]}"
+    echo -e "  ${BOLD}${i})${NC} $(_pname $i)"
 done
 echo ""
 echo -ne "请输入编号 [1-7]: "
@@ -115,9 +84,9 @@ read -r choice
 [[ "$choice" =~ ^[1-7]$ ]] || die "无效选择"
 
 SELECTED="$choice"
-SELECTED_NAME="${P_NAMES[$SELECTED]}"
-UPSTREAM="${P_URLS[$SELECTED]}"
-DEFAULT_MODEL="${P_MODELS[$SELECTED]}"
+SELECTED_NAME="$(_pname $SELECTED)"
+UPSTREAM="$(_purl $SELECTED)"
+DEFAULT_MODEL="$(_pmodel $SELECTED)"
 ok "已选择: $SELECTED_NAME"
 
 # ── 自定义 URL ────────────────────────────────────────
@@ -164,7 +133,8 @@ read -r input_port
 [[ -n "$input_port" ]] && PORT="$input_port"
 
 # ── 上下文窗口 ────────────────────────────────────────
-PRESET_CONTEXT="${P_CONTEXT[$SELECTED]:-0}"
+PRESET_CONTEXT="$(_pctx $SELECTED)"
+PRESET_CONTEXT="${PRESET_CONTEXT:-0}"
 CONTEXT_WINDOW="$PRESET_CONTEXT"
 AUTO_COMPACT_LIMIT="0"
 
@@ -408,24 +378,28 @@ meta = {"provider_url": "$UPSTREAM", "provider_model": model, "port": port}
 local_settings_path = Path("$CC_SWITCH_DIR/settings.json")
 try:
     local_settings = json.loads(local_settings_path.read_text()) if local_settings_path.exists() else {}
-except: local_settings = {}
+except:
+    local_settings = {}
 current_id = local_settings.get("currentProviderCodex")
 if current_id and current_id != provider_id:
-    row = con.execute("select settings_config from providers where app_type=? and id=?", (app_type, current_id)).fetchone()
-    if row:
-        try: cs = json.loads(row[0] or "{}")
-        except: cs = {}
-        codex_config = Path("$CODEX_DIR/config.toml")
-        codex_auth = Path("$CODEX_DIR/auth.json")
-        live_config = codex_config.read_text() if codex_config.exists() else ""
-        live_auth = json.loads(codex_auth.read_text()) if codex_auth.exists() else {}
-        if live_config and "openai_codex_adapter" not in live_config:
-            cs["config"] = live_config
-            cs["auth"] = live_auth
-            con.execute("update providers set settings_config=? where app_type=? and id=?",
-                        (json.dumps(cs, ensure_ascii=False, separators=(",",":")), app_type, current_id))
-except Exception as e:
-    print(f"  backfill skip: {e}")
+    try:
+        row = con.execute("select settings_config from providers where app_type=? and id=?", (app_type, current_id)).fetchone()
+        if row:
+            try:
+                cs = json.loads(row[0] or "{}")
+            except:
+                cs = {}
+            codex_config = Path("$CODEX_DIR/config.toml")
+            codex_auth = Path("$CODEX_DIR/auth.json")
+            live_config = codex_config.read_text() if codex_config.exists() else ""
+            live_auth = json.loads(codex_auth.read_text()) if codex_auth.exists() else {}
+            if live_config and "openai_codex_adapter" not in live_config:
+                cs["config"] = live_config
+                cs["auth"] = live_auth
+                con.execute("update providers set settings_config=? where app_type=? and id=?",
+                            (json.dumps(cs, ensure_ascii=False, separators=(",",":")), app_type, current_id))
+    except Exception as e:
+        print(f"  backfill skip: {e}")
 
 max_sort = con.execute("select coalesce(max(sort_index),-1) from providers where app_type=?", (app_type,)).fetchone()[0]
 con.execute("""insert into providers (
